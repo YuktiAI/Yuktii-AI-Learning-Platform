@@ -266,3 +266,20 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 
 logger.info(`Worker listening on queue: ${EVALUATION_QUEUE_NAME}`);
+
+// ── Health-check HTTP server (keeps Render free tier alive) ───────────────────
+// Render requires an open HTTP port; a free cron (cron-job.org) pings /health
+// every 5 minutes to prevent the service from sleeping.
+import { createServer } from 'http';
+const PORT = process.env.PORT ?? 3001;
+createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', queue: EVALUATION_QUEUE_NAME, ts: new Date().toISOString() }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+}).listen(PORT, () => {
+  logger.info(`Health-check server listening on port ${PORT}`);
+});

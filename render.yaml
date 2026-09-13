@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: yuktii-eval-worker
+    runtime: node
+    rootDir: evaluation-worker
+    buildCommand: npm install
+    startCommand: npm run start
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
