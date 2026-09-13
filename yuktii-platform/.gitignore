@@ -1,0 +1,32 @@
+# Node
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Env files — NEVER commit these
+.env
+.env.local
+.env.production
+.env*.local
+
+# SQLite (replaced by Neon Postgres)
+prisma/dev.db
+prisma/dev.db-journal
+prisma/migrations_sqlite_backup/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Prisma binary
+node_modules/.prisma/

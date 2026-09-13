@@ -1,0 +1,10 @@
+# Railway configuration for evaluation-worker
+# This runs the BullMQ worker as a persistent Node.js service
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm run start"
+restartPolicyType = "always"

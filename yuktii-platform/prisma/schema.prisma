@@ -1,0 +1,482 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")        // pooled URL — used by Next.js serverless functions
+  directUrl = env("DIRECT_DATABASE_URL") // direct (non-pooled) — used by Prisma migrations
+}
+
+// ─────────────────────────────────────────────
+// Content model: Domain → Track → Stage
+// ─────────────────────────────────────────────
+
+model Domain {
+  id                   String   @id @default(cuid())
+  name                 String   @unique
+  slug                 String   @unique
+  tagline              String
+  description          String
+  iconKey              String?  // maps to a static icon/3D playcard asset
+  prerequisiteDomainId String?  // Addition 3: points to required domain (e.g. ai-ml for llm domain)
+  prerequisiteDomain   Domain?  @relation("DomainPrerequisites", fields: [prerequisiteDomainId], references: [id])
+  dependentDomains     Domain[] @relation("DomainPrerequisites")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tracks Track[]
+}
+
+// TrackLevel values: FOUNDATION | FOUNDATION_PLUS | PRACTITIONER | APPLIED_PRACTITIONER | CAPSTONE
+
+model Track {
+  id              String   @id @default(cuid())
+  domainId        String
+  domain          Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  duration        Int // 30 / 45 / 60 / 75 / 90
+  levelName       String   // TrackLevel: FOUNDATION | FOUNDATION_PLUS | PRACTITIONER | APPLIED_PRACTITIONER | CAPSTONE
+  certificateName String   // e.g. "Foundation Certificate"
+  price           Int      // in paise (INR)
+  isPublished     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  stages      Stage[]
+  enrollments Enrollment[]
+
+  @@unique([domainId, duration])
+}
+
+model Stage {
+  id                 String   @id @default(cuid())
+  trackId            String
+  track              Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  stageNumber        Int
+  title              String
+  learningObjectives String
+  plainLanguageIntro String   // beginner-friendly explanation, required before every task
+  taskTemplate       String   // base task brief; AI-variation layer personalizes this in Phase 3
+  modelAnswer        String
+  rubricJson         String   // JSON stored as string (SQLite-compatible)
+  // Evaluation engine fields (Phase 2)
+  harnessType        String   @default("broad")       // "narrow" | "broad"
+  difficultyTier     String   @default("foundation")  // foundation | practitioner | applied | capstone
+  generationVersion  String   @default("v1.0")
+  generationModel    String   @default("llama-3.3-70b-versatile")
+  generationSchema   String?  // JSON: pinned schema spec used for generation
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  submissions Submission[]
+
+  @@unique([trackId, stageNumber])
+}
+
+// ─────────────────────────────────────────────
+// People
+// ─────────────────────────────────────────────
+
+// Role values: STUDENT | ADMIN | INSTITUTION_ADMIN
+// (stored as String for SQLite compatibility)
+
+model Student {
+  id                 String       @id @default(cuid())
+  name               String
+  email              String       @unique
+  phone              String       @default("") // was optional — now required; migration sets '' for existing rows
+  college            String?
+  degreeProgram      String       @default("Other") // NEW: required — BSc | MSc | BE/B.Tech | ME/M.Tech | BCA/MCA | Other
+  degreeProgramOther String?      // NEW: free-text when degreeProgram = "Other"
+  passwordHash       String
+  role               String       @default("STUDENT") // Role: STUDENT | ADMIN | INSTITUTION_ADMIN
+  institutionId      String?      // Phase 4: links a student to a bulk-cohort institution
+  institution        Institution? @relation(fields: [institutionId], references: [id])
+  adminTotpSecret    String?      // TOTP 2FA secret for admin accounts (base32 encoded)
+  adminTotpEnabled   Boolean      @default(false) // true once admin completes TOTP setup
+  createdAt          DateTime     @default(now())
+
+  enrollments Enrollment[]
+}
+
+
+// Phase 4 — Institution / B2B bulk-cohort (schema-ready, no UI yet)
+model Institution {
+  id           String   @id @default(cuid())
+  name         String
+  contactEmail String
+  createdAt    DateTime @default(now())
+
+  students Student[]
+}
+
+// ─────────────────────────────────────────────
+// Enrollment / progress / certification
+// ─────────────────────────────────────────────
+
+// EnrollmentStatus values: PENDING_PAYMENT | IN_PROGRESS | SUBMITTED | COMPLETED
+// PaymentStatus values: PENDING | PAID | FAILED | REFUNDED
+// (stored as String for SQLite compatibility)
+
+model Enrollment {
+  id                String   @id @default(cuid())
+  studentId         String
+  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  trackId           String
+  track             Track    @relation(fields: [trackId], references: [id])
+  status            String   @default("PENDING_PAYMENT") // EnrollmentStatus
+  paymentStatus     String   @default("PENDING")         // PaymentStatus
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  iotMode           String?   // "hardware" | "simulation" — locked choice for IoT tracks
+  roboticsMode      String?   // NEW: "hardware" | "simulation" — locked choice for Robotics tracks
+  aiVariantJson        String?   // Phase 3: JSON stored as string (SQLite-compatible), unique AI-generated scenario
+  aiVariantGeneratedAt DateTime? // Phase 3: when the variant was first generated
+  aiVariantLockedAt    DateTime? // Phase 3: once set, variant is LOCKED — no further changes allowed
+  stageUnlockSchedule  String?   // JSON: { "1": ISO string, "2": ISO string, ... } — computed at enrollment
+  enrolledAt           DateTime  @default(now())
+  completedAt       DateTime?
+
+  submissions Submission[]
+  certificate Certificate?
+  stageContents StageGeneratedContent[]
+  submissionRecords SubmissionRecord[]
+  evaluations       Evaluation[]
+  emailLogs         EmailLog[]
+
+  @@unique([studentId, trackId])
+}
+
+
+model Submission {
+  id                     String     @id @default(cuid())
+  enrollmentId           String
+  enrollment             Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stageId                String
+  stage                  Stage      @relation(fields: [stageId], references: [id])
+  contentUrl             String?
+  contentNote            String?
+  selfCheckCompleted     Boolean    @default(false)
+  aiEvalScore            Float?     // 0-100 score from Groq LLM
+  aiEvalFeedback         String?    // Detailed feedback from LLM
+  aiEvalPassed           Boolean?   // LLM pass/fail decision
+  aiEvalAt               DateTime?  // When LLM evaluation ran
+  similarityScore        Float?     // Phase 4: plagiarism-similarity check across submissions
+  submittedAt            DateTime   @default(now())
+  evaluationEligibleAt   DateTime?  // Date when evaluation result & cert can be released (submittedAt + 5 days for IoT capstone)
+  evaluationReleasedAt   DateTime?  // Date when result was actually released to student
+  flaggedForManualReview Boolean    @default(false) // 10-15% random spot-check for admin QA
+  manualReviewStatus     String?    // "PENDING" | "APPROVED" | "OVERRIDDEN"
+  manualReviewNotes      String?
+
+  @@unique([enrollmentId, stageId])
+}
+
+// ─────────────────────────────────────────────
+// AI-generated stage content — stored permanently per enrollment+stage
+// Once a row exists, Groq is NEVER called again for that enrollment+stage.
+// ─────────────────────────────────────────────
+
+model StageGeneratedContent {
+  id                 String     @id @default(cuid())
+  enrollmentId       String
+  enrollment         Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stageNumber        Int
+  // AI-generated structured fields
+  problemStatement   String     // Full problem statement for this student+stage
+  requirements       String     // JSON array: ["req1", "req2", ...]
+  resourceTags       String     // JSON array of tags Groq returned: ["retail-timeseries", ...]
+  resourceLinkIds    String     // JSON array of matched ResourceLink IDs
+  acceptanceCriteria String     // JSON array: ["criterion1", ...]
+  estimatedEffort    String     @default("")
+  generationStatus   String     @default("SUCCESS") // SUCCESS | FAILED
+  // Extended structured contract (Phase 2 Section 9)
+  title                   String   @default("")
+  learningObjectives      String   @default("[]")  // JSON array
+  starterFiles            String   @default("{}")  // JSON object: filename → content
+  hiddenTestCases         String   @default("[]")  // JSON array of test specs
+  difficultyTier          String   @default("foundation")
+  nonTechnicalExplanation String   @default("")    // MANDATORY plain-language explanation
+  technicalExplanation    String   @default("")
+  expectedFileStructure   String   @default("[]")  // JSON array of expected file paths
+  passFailCriteria        String   @default("{}")  // JSON: {mustPass: [], shouldPass: []}
+  critiquePassResult      String   @default("{}")  // JSON: critique output from two-pass generation
+  generationVersion       String   @default("v1.0")
+  generationModel         String   @default("")
+  generatedAt        DateTime   @default(now())
+
+  @@unique([enrollmentId, stageNumber])
+}
+
+model Certificate {
+  id                  String     @id @default(cuid())
+  enrollmentId        String     @unique
+  enrollment          Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  publicCertificateId String     @unique // used in /verify/[certificateId]
+  issueDate           DateTime   @default(now())
+  pdfUrl              String?
+  qrCodeUrl           String?
+}
+
+// Short-lived email/SMS verification codes. Database storage keeps verification
+// reliable across application restarts and multiple server instances.
+model OtpCode {
+  contact    String   @id
+  codeHash   String
+  type       String   // signup | forgot
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// Email delivery audit log — records every send attempt for certificate emails.
+// Failed sends are visible in admin portal email-logs page for investigation/retry.
+// ─────────────────────────────────────────────
+
+model EmailLog {
+  id             String     @id @default(cuid())
+  enrollmentId   String?
+  enrollment     Enrollment? @relation(fields: [enrollmentId], references: [id])
+  recipientEmail String
+  subject        String
+  status         String     // "sent" | "failed"
+  errorMessage   String?    // full error details if failed (SMTP config, network, etc.)
+  smtpHost       String?    // which SMTP host was configured (helps diagnose config issues)
+  attemptedAt    DateTime   @default(now())
+
+  @@index([enrollmentId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// Curated datasets — admin-maintained, Groq selects by ID (never generates URLs)
+// ─────────────────────────────────────────────
+
+model DatasetResource {
+  id             String    @id @default(cuid())
+  name           String
+  url            String
+  domainTags     String    // comma-separated slugs e.g. "ai-ml,data-science"
+  sourcePlatform String    // Kaggle | UCI | DataGov | HuggingFace | Other
+  description    String    @default("")
+  isHealthy      Boolean   @default(true)
+  lastCheckedAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// Curated resource links — admin-maintained, Groq matches by tags (never generates URLs)
+// Used for the per-stage resource assignment in AI-generated content.
+// ─────────────────────────────────────────────
+
+model ResourceLink {
+  id          String   @id @default(cuid())
+  domainSlug  String   // e.g. "ai-ml", "iot", "erp-odoo" — matches Domain.slug
+  tags        String   // JSON array as string: ["retail-timeseries", "sales-forecasting"]
+  title       String
+  url         String
+  sourceType  String   // "kaggle" | "uci" | "huggingface" | "api-docs" | "hardware-datasheet" | "github-sample" | "other"
+  description String   @default("")
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// AI generation audit log — stored for every Groq call
+// ─────────────────────────────────────────────
+
+model AiGenerationLog {
+  id            String   @id @default(cuid())
+  enrollmentId  String
+  stageId       String
+  promptVersion String   // e.g. "v1.0"
+  modelName     String   // e.g. "llama-3.3-70b-versatile"
+  rawResponse   String   // full raw Groq response
+  status        String   // SUCCESS | RETRY_SUCCESS | FALLBACK
+  scenario      String?  // extracted scenario string
+  datasetId     String?  // selected DatasetResource.id
+  createdAt     DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// Curated IoT project blueprints — admin-maintained.
+// Groq SELECTS a blueprint (never invents components) at master-generation time.
+// ─────────────────────────────────────────────
+
+model IoTProjectBlueprint {
+  id               String   @id @default(cuid())
+  title            String   // e.g. "Smart Soil Moisture Irrigation System"
+  components       String   // JSON array: ["ESP32", "Soil Moisture Sensor", "Relay Module", "Water Pump"]
+  simulatorUrl     String?  // Wokwi project template link
+  hardwareOptional Boolean  @default(true) // true = simulator-first; false = requires physical hardware
+  difficultyLevel  String   // "foundation" | "intermediate" | "advanced"
+  category         String   // "agriculture" | "home-automation" | "environmental-monitoring" | "security" | "industrial" | "health"
+  description      String   @default("") // brief plain-english description for admin reference
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// Curated Odoo module+business-process combinations — admin-maintained.
+// Groq SELECTS a scenario (never invents a module) at master-generation time.
+// ─────────────────────────────────────────────
+
+model OdooModuleScenario {
+  id              String   @id @default(cuid())
+  moduleName      String   // "Sales" | "Inventory" | "HR" | "Accounting" | "Purchase" | "POS" | "Manufacturing"
+  businessType    String   // e.g. "wholesale distributor", "small clinic", "manufacturing unit"
+  processFocus    String   // e.g. "order-to-cash", "stock replenishment", "employee onboarding"
+  difficultyLevel String   // "foundation" | "intermediate" | "advanced"
+  description     String   @default("") // brief plain-english description for admin reference
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// AI-powered evaluation subsystem — Phase 2 addition
+// ─────────────────────────────────────────────
+
+// Tracks every distinct repository submission per enrollment.
+// Used for duplicate/resubmission detection via normalizedRepoUrl and repositoryId.
+// A new row is created for each submission attempt, even if the repo URL is the same.
+model SubmissionRecord {
+  id                   String     @id @default(cuid())
+  enrollmentId         String
+  enrollment           Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stageId              String
+  submittedUrl         String     // raw URL as submitted by the student
+  normalizedRepoUrl    String     // lowercased, stripped of protocol / trailing slash / .git suffix
+  repositoryId         String?    // GitHub's numeric repo ID — more reliable than URL string matching
+  commitSha            String?    // HEAD commit SHA at time of submission
+  submittedAt          DateTime   @default(now())
+  previousSubmissionId String?    // links to a prior SubmissionRecord if this is a resubmission
+
+  evaluation Evaluation? // 1-to-1: one evaluation per submission record
+
+  @@index([enrollmentId, stageId])
+  @@index([normalizedRepoUrl])
+}
+
+// Stores the complete output of the 11-stage evaluation pipeline.
+model Evaluation {
+  id                   String          @id @default(cuid())
+  submissionRecordId   String          @unique
+  submissionRecord     SubmissionRecord @relation(fields: [submissionRecordId], references: [id])
+  enrollmentId         String
+  enrollment           Enrollment      @relation(fields: [enrollmentId], references: [id])
+  stageId              String
+
+  // Pipeline state
+  status               String   @default("queued")
+  // "queued" | "running" | "completed" | "failed" | "needs_review"
+  currentStageLabel    String?  // human-readable progress label shown in the dashboard
+
+  // Final scores — populated on completion
+  finalScore           Int?     // 0–100
+  categoryScores       String?
+
+  // Per-requirement results (array)
+  requirementResults   String?
+
+  // Agent outputs (raw structured JSON from each agent)
+  deterministicChecks  String?
+  openHandsFindings    String?
+  sweAgentFindings     String?
+
+  // Git history analysis
+  gitHistoryAnalysis   String?
+
+  // AI usage signals
+  aiUsageAnalysis      String?
+
+  // Mentor report
+  mentorReport         String?
+
+  // Resubmission tracking
+  previousEvaluationId String?
+  scoreDelta           Int?
+
+  // Phase 2 Section 9 — evaluation engine fields
+  harnessType           String?  // "narrow" | "broad"
+  harnessVersion        String?  // e.g. "swe-agent-0.6.1"
+  sanityScore           Int?     // 0-100 from Groq sanity scorer (second opinion)
+  sanityDiff            Int?     // |finalScore - sanityScore| — flags if > 20
+  flaggedForHumanReview Boolean  @default(false)
+  humanReviewReason     String?  // why it was flagged: score_discrepancy | boundary_case | gave_up | duplicate
+  agentTrajectory       String?  // JSON array of all agent iteration steps (last 100)
+  promptInjectionFlags  String?  // JSON: list of suspicious strings found in student code
+
+  // Timestamps
+  startedAt            DateTime?
+  completedAt          DateTime?
+  errorMessage         String?  // set on failure
+  createdAt            DateTime @default(now())
+
+  @@index([enrollmentId, stageId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+// Robotics Domain — curated project blueprints
+// Groq SELECTS a blueprint (never invents components) at master-generation time.
+// Structured identically to IoTProjectBlueprint.
+// ─────────────────────────────────────────────
+
+model RoboticsProjectBlueprint {
+  id               String   @id @default(cuid())
+  title            String   // e.g. "Line-Following Robot", "Obstacle-Avoidance Rover"
+  components       String   // JSON array: ["Arduino Uno", "IR Sensors", "DC Motors", "L298N Motor Driver", "Chassis"]
+  simulatorUrl     String?  // for the simulation path — e.g. a Webots or Wokwi project template link
+  simulatorName    String?  // "Webots" | "Gazebo" | "Wokwi" | "TinkerCAD" | "CoppeliaSim"
+  hardwareOptional Boolean  @default(true) // true = simulator-first; false = requires physical hardware
+  difficultyLevel  String   // "foundation" | "intermediate" | "advanced"
+  category         String   // "navigation" | "manipulation" | "swarm" | "vision-guided" | "line-following" | "object-detection"
+  description      String   @default("") // brief plain-english description for admin reference
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Centralized Error Log — captures every internal failure platform-wide.
+// Students never see this data. Admins see it in the portal + receive alert emails.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ErrorLog {
+  id           String   @id @default(cuid())
+
+  // Which integration/service failed
+  service      String   // e.g. "groq-project-generation", "claude-evaluation", "e2b-sandbox", "razorpay", "smtp-otp"
+
+  // Full technical detail (never shown to students)
+  errorMessage String   // raw error message from the provider or system
+  errorCode    String?  // HTTP status code, error type, or provider error code
+  stackTrace   String?  // stack trace where available
+
+  // Context about which operation/student was affected
+  context      String?  // JSON: arbitrary metadata (e.g. model used, repoUrl, stage number)
+  studentId    String?  // affected student, if known
+  enrollmentId String?  // affected enrollment, if known
+  evaluationId String?  // affected evaluation, if known
+
+  // Severity classification
+  severity     String   @default("transient") // "critical" | "transient"
+  // critical  = balance exhausted, API key invalid, service down — needs immediate human action
+  // transient = single timeout/retry failure — may self-recover
+
+  // Alert throttling: tracks the last time an admin alert was sent for this error pattern
+  alertSentAt  DateTime? // timestamp of last admin alert email for this error type
+  alertCount   Int       @default(1)  // how many times this error has fired in the current throttle window
+
+  // Resolution tracking
+  resolvedAt   DateTime?
+  resolvedBy   String?  // admin email who marked it resolved
+  resolution   String?  // optional resolution note
+
+  createdAt    DateTime @default(now())
+
+  @@index([service, errorCode, createdAt])
+  @@index([severity, resolvedAt])
+  @@index([studentId])
+  @@index([enrollmentId])
+}

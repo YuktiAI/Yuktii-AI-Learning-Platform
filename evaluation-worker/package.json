@@ -1,0 +1,34 @@
+{
+  "name": "yuktii-evaluation-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone async evaluation worker for the Yuktii AI internship platform",
+  "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "start": "tsx src/worker.ts",
+    "build": "tsc --noEmit",
+    "test": "tsx src/__tests__/run-tests.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
+    "@e2b/code-interpreter": "^2.8.0",
+    "@prisma/client": "^5.20.0",
+    "axios": "^1.7.7",
+    "bullmq": "^5.12.0",
+    "groq-sdk": "^1.6.0",
+    "ioredis": "^5.4.1",
+    "qrcode": "^1.5.4",
+    "simple-git": "^3.26.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.5",
+    "@types/qrcode": "^1.5.6",
+    "prisma": "^5.20.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  },
+  "prisma": {
+    "schema": "../yuktii-platform/prisma/schema.prisma"
+  }
+}
