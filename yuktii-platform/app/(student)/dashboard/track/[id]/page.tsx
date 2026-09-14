@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { CheckCircle2, Lock, ChevronRight, Award, AlertTriangle, RefreshCw, ExternalLink, Cpu, Monitor } from 'lucide-react';
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { generateMasterProject } from '@/lib/ai-generator/generateMasterProject';
 import { getOrGenerateStageContent } from '@/lib/ai-generator/getOrGenerateStageContent';
 import { AiGenerationError } from '@/lib/ai-generator/AiGenerationError';
 import SubmissionForm from './SubmissionForm';
@@ -14,7 +15,7 @@ export default async function TrackDetailPage({
   searchParams,
 }: {
   params: { id: string };
-  searchParams: { stage?: string };
+  searchParams: { stage?: string; retry?: string };
 }) {
   const session = await getSession();
   if (!session) redirect('/login');
@@ -158,6 +159,15 @@ export default async function TrackDetailPage({
 
   // Only attempt AI content when enrollment has an active master project
   if (currentStage && enrollment.status !== 'PENDING_PAYMENT') {
+    // Check if retry is explicitly requested by the student
+    const isRetry = searchParams.retry === '1';
+    if (isRetry) {
+      // Clear any previous failed stage content for this stage
+      await prisma.stageGeneratedContent.deleteMany({
+        where: { enrollmentId: enrollment.id, stageNumber: currentStage.stageNumber, generationStatus: 'FAILED' },
+      });
+    }
+
     // Check if master project is locked yet
     const variantJson = enrollment.aiVariantJson;
     let masterFailed = false;
@@ -168,11 +178,43 @@ export default async function TrackDetailPage({
       } catch { /* ignore */ }
     }
 
+    // AUTO-HEAL: If master project was never generated/locked (or if retry requested), generate it now on-demand
+    if (!enrollment.aiVariantLockedAt || (masterFailed && isRetry)) {
+      try {
+        const { name: domainName, slug: domainSlug } = enrollment.track.domain;
+        const { levelName } = enrollment.track;
+        const masterProject = await generateMasterProject(domainName, levelName, domainSlug);
+
+        enrollment = await prisma.enrollment.update({
+          where: { id: enrollment.id },
+          data: {
+            aiVariantJson:        JSON.stringify(masterProject),
+            aiVariantGeneratedAt: new Date(),
+            aiVariantLockedAt:    new Date(),
+          },
+          include: {
+            track: {
+              include: {
+                domain: true,
+                stages: { orderBy: { stageNumber: 'asc' } },
+              },
+            },
+            submissions: true,
+            certificate: true,
+          },
+        });
+        masterFailed = false;
+        masterPending = false;
+      } catch (err: any) {
+        console.error('[track-page] On-demand master project generation failed:', err?.message || err);
+        masterFailed = true;
+      }
+    }
+
     if (!enrollment.aiVariantLockedAt) {
       if (masterFailed) {
-        stageContentError = 'The AI project generator failed to create your scenario. Please use the Retry button or contact support.';
+        stageContentError = 'The AI project generator failed to create your scenario. Please click "Retry generation" below.';
       } else {
-        // Still generating in background
         masterPending = true;
       }
     } else {
@@ -187,13 +229,13 @@ export default async function TrackDetailPage({
           learningObjectives: currentStage.learningObjectives,
         });
         if (stageContent.generationStatus === 'FAILED') {
-          stageContentError = 'Stage content generation failed previously. Click "Retry" to try again.';
+          stageContentError = 'Stage content generation failed previously. Click "Retry generation" to try again.';
           stageContent = null;
         }
       } catch (err) {
         stageContentError = err instanceof AiGenerationError
           ? err.message
-          : 'An unexpected error occurred generating your project content.';
+          : 'An unexpected error occurred generating your project content. Click "Retry generation" below.';
       }
     }
   }
@@ -414,10 +456,11 @@ export default async function TrackDetailPage({
                 {/* Pending state — master project still being generated */}
                 {masterPending && (
                   <div className="flex items-start gap-3 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <meta httpEquiv="refresh" content="4" />
                     <RefreshCw size={18} className="shrink-0 mt-0.5 animate-spin" />
                     <div>
                       <p className="font-medium text-sm">Generating your unique project scenario...</p>
-                      <p className="text-xs text-amber-600 mt-1">This usually takes 5-15 seconds. Refresh the page in a moment.</p>
+                      <p className="text-xs text-amber-600 mt-1">This takes just a few seconds. The page will refresh automatically...</p>
                     </div>
                   </div>
                 )}

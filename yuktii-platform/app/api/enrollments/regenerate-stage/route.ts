@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionSync } from '@/lib/auth';
+import { generateMasterProject } from '@/lib/ai-generator/generateMasterProject';
 import { getOrGenerateStageContent } from '@/lib/ai-generator/getOrGenerateStageContent';
 import { AiGenerationError } from '@/lib/ai-generator/AiGenerationError';
 import { logError } from '@/lib/error-handler';
@@ -55,6 +56,25 @@ export async function POST(req: NextRequest) {
   const stage = enrollment.track.stages.find(s => s.stageNumber === stageNumber);
   if (!stage) {
     return NextResponse.json({ error: 'Stage not found' }, { status: 404 });
+  }
+
+  // If master project wasn't generated/locked yet, generate it first
+  if (!enrollment.aiVariantLockedAt) {
+    try {
+      const { name: domainName, slug: domainSlug } = enrollment.track.domain;
+      const { levelName } = enrollment.track;
+      const masterProject = await generateMasterProject(domainName, levelName, domainSlug);
+      await prisma.enrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          aiVariantJson:        JSON.stringify(masterProject),
+          aiVariantGeneratedAt: new Date(),
+          aiVariantLockedAt:    new Date(),
+        },
+      });
+    } catch (e) {
+      console.warn('[regenerate-stage] Failed to auto-generate master project:', e);
+    }
   }
 
   try {

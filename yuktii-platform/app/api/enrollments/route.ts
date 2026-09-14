@@ -105,6 +105,15 @@ export async function POST(req: NextRequest) {
       where: { studentId_trackId: { studentId: session.studentId, trackId: track.id } },
     });
     if (existing && (existing.paymentStatus === 'PAID' || existing.status === 'IN_PROGRESS' || existing.status === 'COMPLETED')) {
+      if (!existing.aiVariantLockedAt) {
+        const fullExisting = await prisma.enrollment.findUnique({
+          where: { id: existing.id },
+          include: { track: { include: { domain: true, stages: { orderBy: { stageNumber: 'asc' } } } } },
+        });
+        if (fullExisting) {
+          waitUntil(triggerMasterProjectGeneration(fullExisting));
+        }
+      }
       return NextResponse.json({ enrollmentId: existing.id, alreadyEnrolled: true });
     }
 
@@ -221,8 +230,8 @@ async function triggerMasterProjectGeneration(enrollment: {
       },
     });
 
-    // Log success
-    await prisma.aiGenerationLog.create({
+    // Log success (non-critical — never let this kill the generation result)
+    prisma.aiGenerationLog.create({
       data: {
         enrollmentId:  enrollment.id,
         stageId:       'master',
@@ -232,7 +241,7 @@ async function triggerMasterProjectGeneration(enrollment: {
         status:        'SUCCESS',
         scenario:      masterProject.scenario,
       },
-    });
+    }).catch((e) => console.warn('[enrollments] AiGenerationLog insert failed (non-fatal):', e?.message));
 
     console.log(`[enrollments] Master project locked for enrollment ${enrollment.id}: ${masterProject.scenario}`);
   } catch (err) {
@@ -247,8 +256,8 @@ async function triggerMasterProjectGeneration(enrollment: {
       },
     });
 
-    // Log failure to AiGenerationLog
-    await prisma.aiGenerationLog.create({
+    // Log failure (non-critical — never let this mask the original error)
+    prisma.aiGenerationLog.create({
       data: {
         enrollmentId:  enrollment.id,
         stageId:       'master',

@@ -38,8 +38,11 @@ export interface LlmResponse<T = any> {
 export function extractAndParseJson<T = any>(raw: string): T {
   let cleaned = raw.trim();
 
-  // Remove markdown code fences if present: ```json ... ``` or ``` ... ```
-  if (cleaned.startsWith('```')) {
+  // Extract content from within markdown code fences if present anywhere in the text
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) {
+    cleaned = fenceMatch[1].trim();
+  } else if (cleaned.startsWith('```')) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   }
 
@@ -47,18 +50,29 @@ export function extractAndParseJson<T = any>(raw: string): T {
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    // Attempt to extract the first { ... } or [ ... ] block
+    // Attempt to extract the first { ... } block
     const objMatch = cleaned.match(/\{[\s\S]*\}/);
     if (objMatch) {
       try {
         return JSON.parse(objMatch[0]) as T;
-      } catch {}
+      } catch {
+        // Strip trailing commas before closing braces/brackets and retry
+        try {
+          const sanitized = objMatch[0].replace(/,\s*([}\]])/g, '$1');
+          return JSON.parse(sanitized) as T;
+        } catch {}
+      }
     }
     const arrMatch = cleaned.match(/\[[\s\S]*\]/);
     if (arrMatch) {
       try {
         return JSON.parse(arrMatch[0]) as T;
-      } catch {}
+      } catch {
+        try {
+          const sanitized = arrMatch[0].replace(/,\s*([}\]])/g, '$1');
+          return JSON.parse(sanitized) as T;
+        } catch {}
+      }
     }
     throw new Error(`Failed to parse valid JSON from LLM output: ${cleaned.slice(0, 100)}...`);
   }
