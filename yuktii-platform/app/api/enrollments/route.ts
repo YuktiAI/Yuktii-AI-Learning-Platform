@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionSync, clearSessionCookie } from '@/lib/auth';
 import { generateMasterProject } from '@/lib/ai-generator/generateMasterProject';
 import { AiGenerationError } from '@/lib/ai-generator/AiGenerationError';
 import { logError } from '@/lib/error-handler';
+
+// Keep Vercel function alive for up to 60s to allow background project generation
+export const maxDuration = 60;
 
 /**
  * Compute the stage unlock schedule for a newly enrolled student.
@@ -139,10 +143,9 @@ export async function POST(req: NextRequest) {
         console.log(`[enrollments] Stage unlock schedule set for ${enrollment.id}: ${schedule}`);
       }
 
-      // Trigger master project generation asynchronously — does not block enrollment response
-      triggerMasterProjectGeneration(enrollment).catch((e) =>
-        console.error('[enrollments] triggerMasterProjectGeneration threw:', e)
-      );
+      // Trigger master project generation — waitUntil keeps the Vercel function
+      // alive after the response is sent so the generation completes.
+      waitUntil(triggerMasterProjectGeneration(enrollment));
       return NextResponse.json({
         enrollmentId: enrollment.id,
         bypassedPayment: true,
