@@ -51,7 +51,7 @@ type MentorReport = {
 
 type FullEvaluation = {
   id: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'needs_review' | 'failed';
   currentStageLabel?: string | null;
   finalScore?: number | null;
   categoryScores?: CategoryScores | null;
@@ -194,7 +194,7 @@ export default function SubmissionForm({
     if (fullEval.status !== 'queued' && fullEval.status !== 'running') return;
     const interval = setInterval(async () => {
       const status = await pollEvaluation(fullEval.id);
-      if (status === 'completed' || status === 'failed') {
+      if (status === 'completed' || status === 'needs_review' || status === 'failed') {
         clearInterval(interval);
       }
     }, 10_000);
@@ -447,6 +447,8 @@ export default function SubmissionForm({
 
   /* ── EVALUATE PHASE ──────────────────────────────────────────────────────── */
   const finalScore = fullEval?.finalScore ?? null;
+  const needsHumanReview = fullEval?.status === 'needs_review';
+  const evaluationFinished = fullEval?.status === 'completed' || needsHumanReview;
   const evalPassed = fullEval?.status === 'completed' && finalScore !== null && finalScore >= 70;
 
   return (
@@ -502,7 +504,7 @@ export default function SubmissionForm({
               Multi-agent pipeline (deterministic checks, execution tests &amp; code analysis)
             </p>
           </div>
-          {fullEval?.status === 'completed' && finalScore !== null && (
+          {evaluationFinished && finalScore !== null && (
             <div
               className={`w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 font-bold ${
                 finalScore >= 70 ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-red-400 bg-red-50 text-red-700'
@@ -619,8 +621,21 @@ export default function SubmissionForm({
             </div>
           )}
 
-          {/* Case 4: Completed */}
-          {fullEval?.status === 'completed' && finalScore !== null && (
+          {/* Case 4: Awaiting human review */}
+          {needsHumanReview && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+              <Clock size={18} className="text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Evaluation awaiting human review</p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Your score has been calculated, but a reviewer must confirm it before this stage can be completed.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Case 5: Completed or awaiting review */}
+          {evaluationFinished && finalScore !== null && (
             <div className="space-y-5">
               {/* Score + delta */}
               <div className="flex items-center gap-4">

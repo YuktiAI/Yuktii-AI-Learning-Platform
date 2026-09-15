@@ -135,7 +135,7 @@ export default async function TrackDetailPage({
   const existingEvaluation = latestEval
     ? {
         id: latestEval.id,
-        status: (latestEval.status as 'queued' | 'running' | 'completed' | 'failed') || 'queued',
+        status: (latestEval.status as 'queued' | 'running' | 'completed' | 'needs_review' | 'failed') || 'queued',
         currentStageLabel: latestEval.currentStageLabel,
         finalScore: latestEval.finalScore,
         categoryScores: latestEval.categoryScores ? JSON.parse(latestEval.categoryScores) : null,
