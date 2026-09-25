@@ -18,7 +18,7 @@
  */
 
 import { callLlmWithFallback } from '../llm/llm-provider.js';
-import { CLAUDE_MODEL_SWE_AGENT, SWE_AGENT_MAX_ITERATIONS } from '../config.js';
+import { MODEL_SWE_AGENT, SWE_AGENT_MAX_ITERATIONS } from '../config.js';
 import { runCommandInSandbox, readFileFromSandbox } from '../sandbox/e2b-sandbox.js';
 import { logger } from '../logger.js';
 import type { OpenHandsFinding, SweAgentFinding } from '../pipeline-context.js';
@@ -52,8 +52,8 @@ export async function investigateClaim(params: {
     return investigateWithMiniSweAgent(params);
   }
 
-  // Claude-powered fallback
-  logger.info('mini-SWE-agent not in sandbox — using Claude targeted investigation', { evaluationId });
+  // LLM-powered fallback via role-based provider routing
+  logger.info('mini-SWE-agent not in sandbox — using LLM-based targeted investigation', { evaluationId });
   return investigateWithClaude(params);
 }
 
@@ -73,7 +73,7 @@ import sys
 from mini_swe_agent import Agent
 
 agent = Agent(
-    model="${CLAUDE_MODEL_SWE_AGENT}",
+    model="${MODEL_SWE_AGENT}",
     max_iterations=${SWE_AGENT_MAX_ITERATIONS},
     repo_path="${sandboxRepoPath}",
     read_only=True
@@ -106,14 +106,14 @@ print("FINDING_JSON:" + json.dumps(finding))
         fileEvidence:  Array.isArray(parsed.fileEvidence) ? parsed.fileEvidence : [],
         conclusion:    String(parsed.conclusion ?? ''),
       };
-    } catch { /* fall through to Claude */ }
+    } catch { /* fall through to LLM */ }
   }
 
-  // If native parsing failed, use Claude to structure the output
+  // If native parsing failed, use LLM to structure the output
   return investigateWithClaude(params);
 }
 
-// ── Claude targeted investigation fallback ────────────────────────────────────
+// ── LLM-based focused investigation (was: Claude fallback) ───────────────────────
 async function investigateWithClaude(params: {
   claim:           OpenHandsFinding;
   sandboxId:       string;
@@ -164,7 +164,7 @@ Output your finding as JSON with this exact structure:
   try {
     const res = await callLlmWithFallback({
       taskName: 'swe-agent-investigation',
-      taskType: 'scoring',
+      role: 'swe-agent',
       systemPrompt,
       userPrompt: userMessage,
       temperature: 0.1,

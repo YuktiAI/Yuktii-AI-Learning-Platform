@@ -4,9 +4,9 @@
   "private": true,
   "description": "Standalone async evaluation worker for the Yuktii AI internship platform",
   "scripts": {
-    "dev": "tsx watch src/worker.ts",
+    "dev": "tsx watch --env-file=.env src/worker.ts",
     "build": "npx prisma generate && tsc --noEmit",
-    "start": "tsx src/worker.ts",
+    "start": "tsx --env-file=.env src/worker.ts",
     "postinstall": "npx prisma generate",
     "test": "tsx src/__tests__/run-tests.ts"
   },

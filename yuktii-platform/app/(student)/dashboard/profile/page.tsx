@@ -168,6 +168,9 @@ export default async function ProfilePage() {
         <h2 className="font-display text-xl font-semibold text-ink mb-4 flex items-center gap-2">
           <Award size={18} className="text-marigold" /> Certificates
         </h2>
+        <Link href="/dashboard/portfolio" className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-teal/30 bg-teal/5 px-3 py-2 text-xs font-semibold text-teal hover:bg-teal/10">
+          <ExternalLink size={13} /> View verified project portfolio
+        </Link>
         {certificates.length === 0 ? (
           <div className="rounded-xl border border-line bg-white p-8 text-center">
             <Award size={32} className="mx-auto text-ink/20 mb-3" />

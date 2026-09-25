@@ -19,7 +19,7 @@
 import { getPrisma } from '../db.js';
 import { logger } from '../logger.js';
 import { DETERMINISTIC_GATE_THRESHOLD } from '../config.js';
-import { runCommandInSandbox, listFilesInSandbox } from '../sandbox/e2b-sandbox.js';
+import { runCommandInSandbox, listFilesInSandbox, readFileFromSandbox } from '../sandbox/e2b-sandbox.js';
 import type { PipelineContext, DeterministicCheckResult } from '../pipeline-context.js';
 
 // ── Domain → expected entry point files ──────────────────────────────────────
@@ -87,6 +87,19 @@ export async function runDeterministicChecks(ctx: PipelineContext): Promise<void
   const rawOutputLines: string[] = [];
   let checksPassedCount = 0;
   let checksTotalCount  = 0;
+
+  // Build a recursive, version-controlled repository inventory before scoring.
+  // This gives the agents a complete source map without treating generated or
+  // dependency folders as student-authored code.
+  const inventoryResult = await runCommandInSandbox(
+    sandboxId,
+    `git -C "${sandboxRepoPath}" ls-files 2>/dev/null || true`,
+    20_000,
+  );
+  const repoFiles = inventoryResult.stdout.split(/\r?\n/).filter(Boolean);
+  const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.cs', '.php', '.rb', '.sql', '.ino']);
+  const sourceFiles = repoFiles.filter((file) => sourceExtensions.has(file.slice(file.lastIndexOf('.')).toLowerCase())).slice(0, 250);
+  rawOutputLines.push(`Repository inventory: ${repoFiles.length} tracked files, ${sourceFiles.length} source files`);
 
   // ── Check 1: Files present in repo root ───────────────────────────────────
   const rootFiles = await listFilesInSandbox(sandboxId, sandboxRepoPath);
@@ -180,6 +193,48 @@ export async function runDeterministicChecks(ctx: PipelineContext): Promise<void
     rawOutputLines.push('No function/route definitions found via grep');
   }
 
+  // ── Check 5: Repository Naming, Structure & Code Reading ───────────────────
+  const repoUrlParts = (job.repoUrl || '').split('/').filter(Boolean);
+  const repoName = repoUrlParts[repoUrlParts.length - 1]?.replace(/\.git$/i, '') || 'unknown-repo';
+  rawOutputLines.push(`Repository name: ${repoName}`);
+
+  const directoriesFound = new Set<string>();
+  for (const file of repoFiles) {
+    const parts = file.split('/');
+    if (parts.length > 1) {
+      directoriesFound.add(parts[0]);
+    }
+  }
+  const dirList = Array.from(directoriesFound).slice(0, 15);
+  rawOutputLines.push(`Directory structure root folders: ${dirList.join(', ') || '(flat root)'}`);
+
+  // Read README content
+  const readmeFile = rootFiles.find(f => readmeVariants.includes(f.toLowerCase()));
+  if (readmeFile) {
+    try {
+      const readmeContent = await readFileFromSandbox(sandboxId, readmeFile);
+      if (readmeContent) {
+        ctx.fileContentsMap[readmeFile] = readmeContent.slice(0, 4000);
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Open and read every source file into ctx.fileContentsMap (capped to keep performance fast)
+  const filesToRead = sourceFiles.slice(0, 100);
+  for (const relPath of filesToRead) {
+    try {
+      const content = await readFileFromSandbox(sandboxId, relPath);
+      if (content) {
+        const lines = content.split(/\r?\n/);
+        const cappedContent = lines.slice(0, 400).join('\n');
+        ctx.fileContentsMap[relPath] = cappedContent;
+      }
+    } catch {
+      // ignore individual read errors
+    }
+  }
+  rawOutputLines.push(`Source code files read into evaluator memory: ${Object.keys(ctx.fileContentsMap).length}`);
+
   // ── Assemble result ────────────────────────────────────────────────────────
   const passFraction = checksTotalCount > 0 ? checksPassedCount / checksTotalCount : 0;
 
@@ -191,6 +246,9 @@ export async function runDeterministicChecks(ctx: PipelineContext): Promise<void
     testsPassCount,
     testsFailCount,
     endpointsFound,
+    repoFileCount: repoFiles.length,
+    sourceFileCount: sourceFiles.length,
+    sourceFiles,
     rawOutput: rawOutputLines.join('\n').slice(0, 5000), // cap size
     checksPassedCount,
     checksTotalCount,

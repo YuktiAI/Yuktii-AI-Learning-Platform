@@ -1,0 +1,14 @@
+{
+  "name": "yuktii-ai-labs-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Yuktii AI Labs Internship & Certification Platform",
+  "scripts": {
+    "dev": "node start.js",
+    "start": "node start.js",
+    "platform:dev": "npm --prefix yuktii-platform run dev",
+    "platform:build": "npm --prefix yuktii-platform run build",
+    "worker:start": "npm --prefix evaluation-worker run start",
+    "worker:dev": "npm --prefix evaluation-worker run dev"
+  }
+}

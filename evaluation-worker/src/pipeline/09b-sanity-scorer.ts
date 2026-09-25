@@ -1,18 +1,29 @@
 /**
  * 09b-sanity-scorer.ts — Section 9.4 Sanity Scorer + Human Review Flagging
  *
- * Runs an independent second-opinion evaluation via Groq (llama-3.3-70b-versatile)
+ * Runs an independent second-opinion evaluation via Gemini (cross-provider)
  * to verify the score produced by the multi-agent pipeline.
  *
- * Discrepancy checks:
- * - If |finalScore - sanityScore| > 20: flags evaluation for human review (score_discrepancy).
- * - If finalScore is on the pass/fail boundary (65-75): flags for human review (boundary_case).
- * - Flags prevent automatic certificate release until an admin reviews or approves.
+ * A-1 PATCH: Disagreement check is FLAG-ONLY — the score is NEVER modified here.
+ * A large delta between primary (Groq-based) and sanity (Gemini) scorers usually
+ * means one scorer is wrong, not that the student's work is wrong. The right
+ * resolution is human review, not an automatic score penalty.
+ *
+ * Flagging conditions:
+ *  1. |primaryScore - sanityScore| > 20 → flagged: 'scorer_disagreement'
+ *  2. primaryScore in boundary zone (65–75) → flagged: 'boundary_case'
+ *
+ * Neither condition modifies ctx.finalScore or ctx.passed.
+ * Flagged evaluations sit in 'needs_review' until an admin acts.
  */
 
 import { callLlmWithFallback, extractAndParseJson } from '../llm/llm-provider.js';
 import { logger } from '../logger.js';
 import type { PipelineContext } from '../pipeline-context.js';
+
+const SANITY_DISAGREEMENT_THRESHOLD = 20;
+const BOUNDARY_LOW  = 65;
+const BOUNDARY_HIGH = 75;
 
 export async function runSanityScorer(ctx: PipelineContext): Promise<void> {
   const { evaluationId, finalScore, job } = ctx;
@@ -49,7 +60,7 @@ Output ONLY valid JSON with this exact schema:
 
     const res = await callLlmWithFallback<{ score: number; rationale?: string }>({
       taskName: 'sanity-scorer',
-      taskType: 'audit',
+      role: 'sanity-scorer',
       systemPrompt: 'You are an objective engineering quality auditor. Output only valid JSON.',
       userPrompt: prompt,
       temperature: 0.2,
@@ -64,7 +75,7 @@ Output ONLY valid JSON with this exact schema:
       logger.info('Sanity scorer succeeded', { provider: res.provider, model: res.modelUsed, sanityScore });
     }
   } catch (err) {
-    logger.warn('Sanity scorer overall call failed — using baseline check', {
+    logger.warn('Sanity scorer overall call failed — using primary score as fallback', {
       evaluationId,
       error: String(err),
     });
@@ -73,7 +84,9 @@ Output ONLY valid JSON with this exact schema:
 
   const sanityDiff = Math.abs(currentScore - sanityScore);
   ctx.sanityScore = sanityScore;
-  ctx.sanityDiff = sanityDiff;
+  ctx.sanityDiff  = sanityDiff;
+  // scorerDisagreementDelta stored for admin visibility regardless of whether it triggers a flag
+  ctx.scorerDisagreementDelta = sanityDiff;
 
   logger.info('Sanity score computed', {
     evaluationId,
@@ -83,25 +96,34 @@ Output ONLY valid JSON with this exact schema:
     rationale,
   });
 
-  // Flag condition 1: Score discrepancy > 20 points
-  if (sanityDiff > 20) {
+  // ── Flag condition 1: Significant scorer disagreement ─────────────────────
+  // A-1 PATCH: This is FLAG-ONLY. The real score stays at ctx.finalScore.
+  // Do NOT cap, do NOT overwrite ctx.finalScore, do NOT set ctx.passed here.
+  // The student sees "under review" (not "failed") until a human decides.
+  if (sanityDiff > SANITY_DISAGREEMENT_THRESHOLD) {
     ctx.flaggedForHumanReview = true;
-    ctx.humanReviewReason = ctx.humanReviewReason || 'score_discrepancy';
-    logger.warn('Evaluation flagged for human review: score discrepancy > 20 points', {
+    ctx.humanReviewReason = ctx.humanReviewReason || 'scorer_disagreement';
+    logger.warn('[sanity] Evaluation flagged for review: scorer disagreement', {
       evaluationId,
       primaryScore: currentScore,
       sanityScore,
       sanityDiff,
+      note: 'Score NOT modified — flag-only per A-1 spec. Admin must resolve.',
     });
   }
 
-  // Flag condition 2: Boundary case (65 - 75 score range around pass threshold 70)
-  if (currentScore >= 65 && currentScore <= 75) {
+  // ── Flag condition 2: Score on pass/fail boundary ─────────────────────────
+  // Scores in 65–75 range are close enough to the threshold that small LLM
+  // variance could flip the outcome — require a human to confirm.
+  if (currentScore >= BOUNDARY_LOW && currentScore <= BOUNDARY_HIGH) {
     ctx.flaggedForHumanReview = true;
     ctx.humanReviewReason = ctx.humanReviewReason || 'boundary_case';
-    logger.info('Evaluation flagged for human review: score on pass/fail boundary (65-75)', {
+    logger.warn('[sanity] Evaluation flagged for review: boundary score', {
       evaluationId,
       currentScore,
     });
   }
+
+  // NOTE: ctx.passed is computed in 11-save-results.ts where both the hard-gate
+  // result and flaggedForHumanReview are both visible. Do not set it here.
 }

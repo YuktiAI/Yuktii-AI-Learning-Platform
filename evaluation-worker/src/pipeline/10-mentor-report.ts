@@ -29,7 +29,7 @@ export async function generateMentorReport(ctx: PipelineContext): Promise<void> 
   try {
     const res = await callLlmWithFallback({
       taskName: 'mentor-report',
-      taskType: 'cognitive',
+      role: 'mentor-report',
       systemPrompt: 'You are a senior technical mentor at a professional internship platform. Give students honest, specific, actionable feedback. Always reference specific evidence. Output ONLY valid JSON. No markdown.',
       userPrompt: prompt,
       temperature: 0.3,
@@ -108,13 +108,39 @@ Category Scores:
     ? `\nNOTE: This is a RESUBMISSION. Previous score: ${(job as any).resubmission.previousFinalScore}/100. Current score: ${ctx.finalScore}/100.`
     : '';
 
+  // A-2: If a hard gate failed, inject explicit context so the mentor report explains
+  // the REAL score plus the specific gate that blocked passing — not a generic fail message.
+  let hardGateContext = '';
+  if (ctx.hardGateFailed) {
+    const gateExplanation = ctx.hardGateReason === 'build_failed'
+      ? `The submission's build FAILED — the project could not be compiled or started. This blocked passing regardless of the rubric score.`
+      : ctx.hardGateReason === 'req_pass_rate_below_threshold'
+        ? `Only ${Math.round((ctx.requirementPassRate ?? 0) * 100)}% of requirements were fully passed (threshold: ${Math.round((parseFloat(process.env.HARD_GATE_REQ_PASS_RATE ?? '0.6')) * 100)}%). This blocked passing.`
+        : `A hard quality gate was not met.`;
+    hardGateContext = `\n## ⚠ Hard Gate Failure\nThe submission scored ${ctx.finalScore}/100 on the rubric but DID NOT PASS because:\n${gateExplanation}\nExplain this clearly in your reasoning section. The student needs to understand that fixing the gate issue (not just the score) is what unblocks them.\n`;
+  }
+
+
+  const problemStatement = job.projectSpec?.problemStatement
+    ? `\n## Project Problem Statement:\n${job.projectSpec.problemStatement}\n`
+    : '';
+
+  const fileExcerpts = Object.entries(ctx.fileContentsMap || {})
+    .slice(0, 5)
+    .map(([file, content]) => `File [${file}]:\n${content.slice(0, 600)}`)
+    .join('\n\n');
+
+  const codeContext = fileExcerpts ? `\n## Key Files Submitted by Student:\n${fileExcerpts}\n` : '';
+
   return `
 You are writing a mentor evaluation report for a student who submitted a GitHub repository for assessment.
 
 ## Student's Project: ${job.domainSlug} domain, Stage ${job.stageNumber} of ${job.totalStages}
-
+Repo URL: ${job.repoUrl}
+${problemStatement}
+${codeContext}
 ## Final Score: ${ctx.finalScore}/100${resubmissionContext}
-
+${hardGateContext}
 ${categoryBreakdown}
 
 ## Requirement Results:

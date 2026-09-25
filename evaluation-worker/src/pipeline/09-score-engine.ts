@@ -19,7 +19,7 @@
  */
 
 import { callLlmWithFallback } from '../llm/llm-provider.js';
-import { CATEGORY_WEIGHTS } from '../config.js';
+import { CATEGORY_WEIGHTS, HARD_GATE_BUILD_REQUIRED, HARD_GATE_REQ_PASS_RATE, EVALUATION_PASS_SCORE_CAPSTONE } from '../config.js';
 import { getPrisma } from '../db.js';
 import { logger } from '../logger.js';
 import type { PipelineContext, CategoryScores } from '../pipeline-context.js';
@@ -32,7 +32,7 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
   // ── Category 1: Requirements (25%) — deterministic from req results ─────────
   const requirementsScore = computeRequirementsScore(ctx);
 
-  // ── Categories 2-9: Signal-based — use Claude to assess 0-100 per category ─
+  // ── Categories 2-9: Signal-based — use LLM to assess 0-100 per category ────
   const signalScores = await computeSignalBasedScores(ctx);
 
   const categoryScores: CategoryScores = {
@@ -48,7 +48,7 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
   };
 
   // ── Weighted final score ──────────────────────────────────────────────────
-  const finalScore = Math.round(
+  let finalScore = Math.round(
     (categoryScores.requirements  * CATEGORY_WEIGHTS.requirements  / 100) +
     (categoryScores.functionality * CATEGORY_WEIGHTS.functionality / 100) +
     (categoryScores.codeQuality   * CATEGORY_WEIGHTS.codeQuality   / 100) +
@@ -60,8 +60,53 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
     (categoryScores.innovation    * CATEGORY_WEIGHTS.innovation    / 100)
   );
 
-  ctx.categoryScores = categoryScores;
-  ctx.finalScore     = Math.min(100, Math.max(0, finalScore));
+  finalScore = Math.min(100, Math.max(0, finalScore));
+
+  // ── Hard Gate 1: Build failure ────────────────────────────────────────────
+  // A-2 PATCH: We no longer overwrite finalScore. The real score is preserved
+  // so the mentor report can say "your code scored 85/100 but build failed."
+  const buildSucceeded = !(
+    HARD_GATE_BUILD_REQUIRED &&
+    ctx.deterministicChecks !== null &&
+    ctx.deterministicChecks.buildSucceeds === false
+  );
+
+  // ── Hard Gate 2: Requirement pass rate ───────────────────────────────────
+  const reqResults    = ctx.requirementResults;
+  const passCount     = reqResults.filter(r => r.status === 'PASS').length;
+  const reqPassRate   = reqResults.length > 0 ? passCount / reqResults.length : 1.0; // default open if no reqs
+  const reqGatePassed = reqPassRate >= HARD_GATE_REQ_PASS_RATE;
+
+  const hardGateFailed = !buildSucceeded || !reqGatePassed;
+  const hardGateReason: PipelineContext['hardGateReason'] = !buildSucceeded
+    ? 'build_failed'
+    : !reqGatePassed
+      ? 'req_pass_rate_below_threshold'
+      : null;
+
+  // finalScore is the REAL weighted score — do not cap or overwrite it
+  ctx.categoryScores       = categoryScores;
+  ctx.finalScore           = finalScore;
+  ctx.hardGateFailed       = hardGateFailed;
+  ctx.hardGateReason       = hardGateReason;
+  ctx.requirementPassRate  = reqPassRate;
+  // ctx.passed is set in 11-save-results.ts where flaggedForHumanReview is also visible
+
+  if (!buildSucceeded) {
+    logger.warn('[hard-gate-1] Build failed — hardGateFailed=true (score preserved at real value)', {
+      evaluationId,
+      realScore: finalScore,
+    });
+  }
+  if (!reqGatePassed) {
+    logger.warn('[hard-gate-2] Req pass rate below threshold — hardGateFailed=true (score preserved)', {
+      evaluationId,
+      passCount,
+      totalReqs: reqResults.length,
+      passRate: reqPassRate.toFixed(2),
+      threshold: HARD_GATE_REQ_PASS_RATE,
+    });
+  }
 
   // Handle resubmission delta
   const resubmission = (ctx.job as any).resubmission;
@@ -70,15 +115,20 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
     scoreDelta = ctx.finalScore - resubmission.previousFinalScore;
   }
 
-  // Persist
+  // Persist the real score + hard gate metadata
   const prisma = getPrisma();
   await prisma.evaluation.update({
     where: { id: evaluationId },
     data: {
-      finalScore:    ctx.finalScore,
+      finalScore:     ctx.finalScore,
       categoryScores: JSON.stringify(categoryScores),
-      scoreDelta:    scoreDelta,
-    },
+      scoreDelta:     scoreDelta,
+      // Store hard gate state so admin queue and mentor report can reference it
+      ...(hardGateFailed ? {
+        hardGateFailed: true,
+        hardGateReason: hardGateReason,
+      } : {}),
+    } as any,
   });
 
   logger.info('Final score computed', {
@@ -86,6 +136,9 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
     stage: 'scoreEngine',
     finalScore: ctx.finalScore,
     scoreDelta,
+    hardGateFailed,
+    hardGateReason,
+    reqPassRate: reqPassRate.toFixed(2),
     categories: Object.entries(categoryScores)
       .map(([k, v]) => `${k}:${v}`)
       .join(', '),

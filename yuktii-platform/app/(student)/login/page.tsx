@@ -292,8 +292,8 @@ function LoginContent() {
   function fail(msg: string) { setErr(msg); setLoading(false); }
 
   async function handleAutoEnrollAndRedirect(role?: string) {
-    if (role === 'ADMIN') {
-      window.location.href = '/admin';
+    if (role === 'ADMIN' || role === 'INSTITUTION_ADMIN') {
+      window.location.href = '/admin-portal';
       return;
     }
     // If the user was redirected here from a protected page, return them there first.
@@ -398,7 +398,8 @@ function LoginContent() {
         password: suPw,
       });
       go('success');
-      setTimeout(() => handleAutoEnrollAndRedirect(data.role), 1800);
+      // Redirect immediately — no delay needed, cookie is already set
+      handleAutoEnrollAndRedirect(data.role);
     } catch (e: any) { setErr(e.message); }
     finally { setLoading(false); }
   }

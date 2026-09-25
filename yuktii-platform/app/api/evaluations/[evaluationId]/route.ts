@@ -59,7 +59,12 @@ export async function GET(
   if (evaluation.previousEvaluationId) {
     previousEvaluation = await prisma.evaluation.findUnique({
       where: { id: evaluation.previousEvaluationId },
-      select: { id: true, finalScore: true, completedAt: true },
+      select: {
+        id: true,
+        finalScore: true,
+        completedAt: true,
+        submissionRecord: { select: { commitSha: true } },
+      },
     });
   }
 
@@ -75,6 +80,8 @@ export async function GET(
     deterministicChecks: safeParseJson(evaluation.deterministicChecks, null),
     openHandsFindings:  safeParseJson(evaluation.openHandsFindings, null),
     sweAgentFindings:   safeParseJson(evaluation.sweAgentFindings, []),
+    aiUsageAnalysis:    safeParseJson(evaluation.aiUsageAnalysis, null),
+    modelAnswer:        (evaluation as any).modelAnswer ?? null,
     errorMessage:       evaluation.errorMessage,
     startedAt:          evaluation.startedAt,
     completedAt:        evaluation.completedAt,

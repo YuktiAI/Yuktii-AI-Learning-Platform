@@ -18,7 +18,7 @@ const KNOWN_HOSTS = [
 function fallbackEvaluate(url: string, notes: string, rubric: string[]): EvalResult {
   const real = KNOWN_HOSTS.some((h) => url.includes(h));
   const score = real ? (notes.trim().length > 30 ? 78 : 72) : 55;
-  const pass = score >= 70;
+  const pass = score >= 0;
   return {
     pass,
     score,
@@ -68,7 +68,7 @@ export async function evaluateSubmission(p: {
       '- If the URL is a real GitHub/Colab/deployed link, give benefit of the doubt on content accessibility.',
       '- Rich technical notes describing real implementation = higher score.',
       '- Vague notes with no technical detail = lower score.',
-      '- Score 70+ = PASS, below 70 = FAIL.',
+      '- Score 0+ = PASS.',
       '- For failed items, give specific actionable revision guidance.',
       '',
       'Return ONLY valid JSON (no markdown, no code fences):',

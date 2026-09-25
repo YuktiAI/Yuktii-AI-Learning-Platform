@@ -467,7 +467,7 @@ export async function runInlineEvaluation(params: {
     });
 
     // ── Stage 8: Generate Certificate and Deliver via Email ──────────────────
-    if (finalScore >= 70 && updatedEval.enrollmentId) {
+    if (finalScore >= 50 && updatedEval.enrollmentId) {
       try {
         console.log(`[inline-evaluator] Triggering certificate generation for enrollment ${updatedEval.enrollmentId}`);
         await generateAndDeliverCertificate(evaluationId, updatedEval.enrollmentId);

@@ -131,6 +131,31 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // ── Same-URL resubmission detection ───────────────────────────────────────
+  // If the student submits the same repo URL that was already evaluated for
+  // this stage (completed), return the existing result immediately.
+  // A new evaluation is only created when the URL is different (new repo or commit).
+  const normalizedRepoUrl = normalizeRepoUrl(repoUrl);
+  const existingCompletedEval = await prisma.evaluation.findFirst({
+    where: {
+      enrollmentId,
+      stageId,
+      status: 'completed',
+      submissionRecord: { normalizedRepoUrl },
+    },
+    orderBy: { completedAt: 'desc' },
+    select: { id: true, status: true, finalScore: true },
+  });
+  if (existingCompletedEval) {
+    return NextResponse.json({
+      evaluationId: existingCompletedEval.id,
+      status:       'completed',
+      finalScore:   existingCompletedEval.finalScore,
+      message:      'This repository was already evaluated for this stage. Submit a new commit or different repository URL to re-evaluate.',
+      cached:       true,
+    });
+  }
+
   // ── Load the locked project spec ──────────────────────────────────────────
   const generatedContent = await prisma.stageGeneratedContent.findUnique({
     where: {
@@ -160,7 +185,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Create SubmissionRecord + Evaluation in a transaction ─────────────────
-  const normalizedRepoUrl = normalizeRepoUrl(repoUrl);
+  // normalizedRepoUrl already computed above in same-URL check
 
   const { submissionRecord, evaluation } = await prisma.$transaction(async (tx) => {
     const submissionRecord = await tx.submissionRecord.create({
@@ -227,7 +252,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       evaluationId:  evaluation.id,
       status:        'queued',
-      message:       'Evaluation queued successfully. This typically takes 5–15 minutes.',
+      message:       'Evaluation queued successfully. This typically takes 1–3 minutes.',
       jobId,
     });
   } catch (err) {

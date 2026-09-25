@@ -1,10 +1,14 @@
 # Railway configuration for evaluation-worker
-# This runs the BullMQ worker as a persistent Node.js service
+# Deployed from the REPO ROOT (not evaluation-worker subdirectory).
+# Railway root dir should be set to "/" (repo root) in Railway dashboard.
+# Build runs from repo root so that ../yuktii-platform/prisma/schema.prisma is accessible.
 
 [build]
 builder = "nixpacks"
-buildCommand = "npm install"
+buildCommand = "cd evaluation-worker && npm install && npm run build"
 
 [deploy]
-startCommand = "npm run start"
+startCommand = "cd evaluation-worker && npm run start"
 restartPolicyType = "always"
+healthcheckPath = "/health"
+healthcheckTimeout = 30

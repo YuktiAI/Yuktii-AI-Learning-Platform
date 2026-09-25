@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import nodemailer from 'nodemailer';
+import { sendMail } from '@/lib/mailer';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -102,16 +102,11 @@ async function sendAdminAlertEmail(opts: {
   errorLogId: string;
   timestamp: Date;
 }): Promise<void> {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  if (!host || !user || !pass) {
-    console.error('[error-handler] Cannot send admin alert — SMTP not configured');
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('[error-handler] Cannot send admin alert — RESEND_API_KEY not configured');
     return;
   }
 
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const from = process.env.SMTP_FROM || `"Yuktii AI Labs Alerts" <${user}>`;
   const isCritical = opts.severity === 'critical';
   const subjectPrefix = isCritical ? '🚨 CRITICAL ALERT' : '⚠️  Error Alert';
   const subject = `${subjectPrefix}: ${opts.service}${opts.alertCount > 1 ? ` [${opts.alertCount}× in 5 min]` : ''}`;
@@ -198,12 +193,12 @@ async function sendAdminAlertEmail(opts: {
 </body></html>`;
 
   try {
-    const transporter = nodemailer.createTransport({
-      host, port, secure: port === 465, auth: { user, pass },
-      tls: { rejectUnauthorized: false },
-    });
-    await transporter.sendMail({ from, to: ADMIN_ALERT_EMAILS.join(', '), subject, html });
-    console.log(`[error-handler] Admin alert sent to ${ADMIN_ALERT_EMAILS.length} addresses — service="${opts.service}" severity="${opts.severity}"`);
+    const res = await sendMail({ to: ADMIN_ALERT_EMAILS, subject, html });
+    if (res.success) {
+      console.log(`[error-handler] Admin alert sent to ${ADMIN_ALERT_EMAILS.length} addresses — service="${opts.service}" severity="${opts.severity}"`);
+    } else {
+      console.error('[error-handler] Failed to send admin alert email:', res.error);
+    }
   } catch (mailErr) {
     console.error('[error-handler] Failed to send admin alert email:', mailErr);
   }

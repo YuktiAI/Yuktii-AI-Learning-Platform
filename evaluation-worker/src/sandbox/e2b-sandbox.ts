@@ -105,7 +105,18 @@ export async function readFileFromSandbox(
   if (!sandbox) {
     // Local fallback
     try {
-      return fs.readFileSync(path.join(sandboxId, filePath), 'utf-8');
+      if (path.isAbsolute(filePath) && fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf-8');
+      }
+      const repoPath = path.join(sandboxId, 'repo', filePath);
+      if (fs.existsSync(repoPath)) {
+        return fs.readFileSync(repoPath, 'utf-8');
+      }
+      const directPath = path.join(sandboxId, filePath);
+      if (fs.existsSync(directPath)) {
+        return fs.readFileSync(directPath, 'utf-8');
+      }
+      return '';
     } catch {
       return '';
     }
@@ -191,7 +202,7 @@ async function createE2bSandbox(repoUrl: string, evaluationId: string): Promise<
   const repoPath = '/home/user/repo';
   const cloneResult = await runCommandInE2b(
     sandbox,
-    `git clone --depth=50 "${repoUrl}" "${repoPath}" 2>&1`,
+    `git clone --depth=50 --no-recurse-submodules "${repoUrl}" "${repoPath}" 2>&1`,
     120_000 // 2 min for clone
   );
 
@@ -232,7 +243,7 @@ async function createLocalSandbox(repoUrl: string, evaluationId: string): Promis
   logger.info('Cloning repo locally (dev mode)', { evaluationId, repoPath });
 
   try {
-    execSync(`git clone --depth=50 "${repoUrl}" "${repoPath}" 2>&1`, {
+    execSync(`git clone --depth=50 --no-recurse-submodules "${repoUrl}" "${repoPath}" 2>&1`, {
       timeout: 120_000,
       stdio:   'pipe',
     });

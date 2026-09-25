@@ -1,36 +1,13 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 /**
- * Generic SMTP mailer — works with any provider (cPanel, Google Workspace, Zoho, etc.)
+ * Resend Email Client
  *
- * Required env vars in .env.local:
- *   SMTP_HOST     — e.g. mail.yuktiiai.in  OR  smtp.gmail.com  OR  smtp.zoho.com
- *   SMTP_PORT     — usually 587 (TLS) or 465 (SSL)
- *   SMTP_USER     — full email address, e.g. connect@yuktiiai.in
- *   SMTP_PASS     — email account password (or app password)
- *   SMTP_FROM     — display address, e.g. "Yuktii AI Labs <connect@yuktiiai.in>"
+ * Required env vars:
+ *   RESEND_API_KEY — Resend API key (e.g. re_123456789)
+ *   RESEND_FROM    — Optional from address (e.g. "Yuktii AI Labs <notifications@yuktiiai.in>",
+ *                    defaults to "Yuktii AI Labs <onboarding@resend.dev>" in dev/testing)
  */
-
-function createTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    throw new Error('SMTP_HOST, SMTP_USER, and SMTP_PASS must be set in .env.local');
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,        // true for 465 (SSL), false for 587 (STARTTLS)
-    auth: { user, pass },
-    tls: {
-      rejectUnauthorized: false, // allows self-signed certs (common on shared hosting)
-    },
-  });
-}
 
 export interface MailAttachment {
   filename: string;
@@ -40,7 +17,7 @@ export interface MailAttachment {
 }
 
 export interface MailOptions {
-  to: string;
+  to: string | string[];
   subject: string;
   html: string;
   text?: string;
@@ -48,27 +25,39 @@ export interface MailOptions {
 }
 
 export async function sendMail(opts: MailOptions): Promise<{ success: boolean; error?: string }> {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const apiKey = process.env.RESEND_API_KEY;
 
-  if (!host || !user || !pass) {
-    const msg = '[mailer] SMTP_HOST, SMTP_USER, SMTP_PASS must be set in .env.local — email not sent';
-    console.error(msg);
+  if (!apiKey) {
+    const msg = '[mailer] RESEND_API_KEY is not set in environment — email not sent';
+    console.warn(msg);
     return { success: false, error: msg };
   }
 
   try {
-    const transporter = createTransporter();
-    const from = process.env.SMTP_FROM || `"Yuktii AI Labs" <${user}>`;
-    await transporter.sendMail({
+    const resend = new Resend(apiKey);
+    const from = process.env.RESEND_FROM || process.env.EMAIL_FROM || 'Yuktii AI Labs <onboarding@resend.dev>';
+    const to = Array.isArray(opts.to) ? opts.to : [opts.to];
+
+    const attachments = opts.attachments?.map((att) => ({
+      filename: att.filename,
+      content: att.content,
+      path: att.path,
+    }));
+
+    const response = await resend.emails.send({
       from,
-      to: opts.to,
+      to,
       subject: opts.subject,
       html: opts.html,
       text: opts.text,
-      attachments: opts.attachments,
+      attachments,
     });
+
+    if (response.error) {
+      console.error('[mailer] Resend API error:', response.error);
+      return { success: false, error: response.error.message };
+    }
+
     return { success: true };
   } catch (err: any) {
     const msg = err?.message ?? String(err);

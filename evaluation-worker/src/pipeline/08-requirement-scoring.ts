@@ -11,7 +11,7 @@
  * and is shown in the dashboard requirement table.
  */
 
-import { callLlmWithFallback } from '../llm/llm-provider.js';
+import { callLlmWithFallback, ScoringUnavailableError } from '../llm/llm-provider.js';
 import { getPrisma } from '../db.js';
 import { logger } from '../logger.js';
 import type {
@@ -72,7 +72,7 @@ Output ONLY valid JSON — an array with one entry per requirement:
   try {
     const res = await callLlmWithFallback({
       taskName: 'requirement-scoring',
-      taskType: 'scoring',
+      role: 'req-scoring',
       systemPrompt: 'You are a precise technical evaluator. Output only valid JSON. No markdown, no code fences.',
       userPrompt: prompt,
       temperature: 0.1,
@@ -124,15 +124,21 @@ Output ONLY valid JSON — an array with one entry per requirement:
       failCount,
     });
   } catch (err) {
-    logger.error('Requirement scoring failed', { evaluationId, stage: 'reqScoring', error: String(err) });
-    // Fallback: create PARTIAL entries for all requirements
-    ctx.requirementResults = requirements.map((r, i) => ({
-      reqId:    `REQ-${i + 1}`,
-      reqText:  r,
-      status:   'PARTIAL' as RequirementStatus,
-      evidence: 'Scoring engine could not determine status from available evidence.',
-      missing:  '',
-    }));
+    // ── Fail-closed (Phase 3.2) ───────────────────────────────────────────────
+    // If requirement scoring fails, do NOT silently degrade to PARTIAL.
+    // A silent degradation would give every student a ~50% requirement score,
+    // making the scoring meaningless. Instead, propagate the error so BullMQ
+    // retries the job on a different worker/provider.
+    //
+    // ScoringUnavailableError means all providers exhausted — re-throw as-is.
+    // Other errors may be transient — also re-throw to trigger retry.
+    logger.error('Requirement scoring failed — failing closed (will retry)', {
+      evaluationId,
+      stage: 'reqScoring',
+      error: String(err),
+      isScoringUnavailable: err instanceof ScoringUnavailableError,
+    });
+    throw err; // propagate — BullMQ will retry
   }
 }
 
@@ -148,6 +154,8 @@ function buildScoringContext(ctx: PipelineContext): string {
 - Build/install succeeds: ${d.buildSucceeds}
 - Tests found and run: ${d.testsRun} (passed: ${d.testsPassCount}, failed: ${d.testsFailCount})
 - Code files with functions found: ${d.endpointsFound.join(', ') || 'none'}
+- Repository inventory: ${d.repoFileCount} tracked files, ${d.sourceFileCount} source files
+- Source files reviewed by the evaluator: ${d.sourceFiles.join(', ') || 'none'}
 `);
   }
 
@@ -168,6 +176,23 @@ ${ctx.sweAgentFindings.map(f =>
   `Claim: "${f.originalClaim}"\nVerdict: ${f.verdict}\nConclusion: ${f.conclusion}`
 ).join('\n\n')}
 `);
+  }
+
+  // Actual source code excerpts
+  const fileEntries = Object.entries(ctx.fileContentsMap || {});
+  if (fileEntries.length > 0) {
+    const codeExcerpts = fileEntries
+      .slice(0, 10)
+      .map(([path, content]) => `--- File: ${path} ---\n${content.slice(0, 1200)}`)
+      .join('\n\n');
+    sections.push(`### Submitted Source Code & Implementation Excerpts:\n${codeExcerpts}\n`);
+  }
+
+  // AI Usage Notice
+  if (ctx.aiUsageAnalysis && ctx.aiUsageAnalysis.suspectedFiles.length > 0) {
+    sections.push(`### AI Usage Notice:
+The following files were flagged as likely AI-generated: ${ctx.aiUsageAnalysis.suspectedFiles.join(', ')}.
+Per evaluation policy: Do NOT consider suspected AI-generated code towards score penalization or bonus, but evaluate the student's genuine implementation and architecture.`);
   }
 
   // Git history signal

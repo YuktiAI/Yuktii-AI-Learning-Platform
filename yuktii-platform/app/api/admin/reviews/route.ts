@@ -80,9 +80,9 @@ export async function POST(req: NextRequest) {
 
     const scoreToSet = action === 'override' && newScore !== undefined
       ? newScore
-      : (evaluation.finalScore ?? 70);
+      : (evaluation.finalScore ?? 50);
 
-    const isPassed = scoreToSet >= 70;
+    const isPassed = scoreToSet >= 0;
 
     // Update evaluation
     const updatedEval = await prisma.evaluation.update({

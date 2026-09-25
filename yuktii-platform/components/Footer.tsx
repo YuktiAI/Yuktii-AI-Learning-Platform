@@ -95,7 +95,6 @@ export default function Footer() {
             © {new Date().getFullYear()} Yuktii AI Labs. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
-            <span className="badge badge-gold">Phase 1 Build</span>
             <span className="text-xs text-paper/30">India · Remote</span>
           </div>
         </div>

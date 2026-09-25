@@ -285,7 +285,7 @@ export default function ReviewsClient({ reviews }: { reviews: ReviewItem[] }) {
                       className="btn-primary text-xs flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
                     >
                       <Check size={13} />
-                      {isProcessing ? 'Processing…' : `Approve Score (${r.finalScore ?? 70}/100)`}
+                      {isProcessing ? 'Processing…' : `Approve Score (${r.finalScore ?? 50}/100)`}
                     </button>
 
                     <button

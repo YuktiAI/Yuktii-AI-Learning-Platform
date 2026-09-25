@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { prisma } from '@/lib/prisma';
+import { verifyCertificate, isLegacyCertificateId, isOldHybridId } from '@/lib/certificate-integrity';
 import type { Metadata } from 'next';
 
 type Props = { params: { certificateId: string } };
@@ -9,13 +10,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: `Certificate Verification — Yuktii AI Labs`,
     description: `Verify certificate ${params.certificateId} issued by Yuktii AI Labs`,
-    robots: 'noindex', // prevent search engines indexing individual cert pages
+    robots: 'noindex',
   };
 }
 
 export default async function VerifyCertificatePage({ params }: Props) {
   const cert = await prisma.certificate.findUnique({
-    where: { publicCertificateId: params.certificateId.toUpperCase() },
+    where: { publicCertificateId: params.certificateId },
     include: {
       enrollment: {
         include: {
@@ -40,10 +41,58 @@ export default async function VerifyCertificatePage({ params }: Props) {
     );
   }
 
+  // ── A-3: HMAC integrity check ───────────────────────────────────────────────
+  // Three tiers of verification depending on certificate generation epoch:
+  //  1. Legacy (YUKTII-YEAR-XX-XX): no hash — pass by DB lookup only
+  //  2. Old-hybrid (UUID.XXXXXX): had enrollment-only 6-char HMAC — skip full check
+  //  3. Current (plain UUID): full payload HMAC stored in verificationHash column
+  const certId   = params.certificateId;
+  const isLegacy = isLegacyCertificateId(certId.toUpperCase());
+  const isOldHybrid = isOldHybridId(certId);
+
+  let hmacValid = true; // default: legacy/old-hybrid pass through
+
+  if (!isLegacy && !isOldHybrid && cert.verificationHash) {
+    // Current-format cert with a stored hash → verify the full payload
+    // Need the finalScore that was in effect when the cert was issued.
+    // We use the most recent completed evaluation for this enrollment.
+    const evalRecord = await prisma.evaluation.findFirst({
+      where: { enrollmentId: cert.enrollment.id, status: 'completed' },
+      orderBy: { completedAt: 'desc' },
+      select: { finalScore: true },
+    });
+
+    hmacValid = verifyCertificate(
+      {
+        studentId:      cert.enrollment.student.id,
+        trackId:        cert.enrollment.track.id,
+        completionDate: cert.issueDate.toISOString().slice(0, 10),
+        finalScore:     evalRecord?.finalScore ?? 0,
+      },
+      cert.verificationHash
+    );
+  }
+  // If verificationHash is null (cert issued before A-3), we trust the DB lookup alone.
+
+  if (!hmacValid) {
+    return (
+      <div className="mx-auto max-w-lg px-5 py-20 text-center">
+        <div className="text-5xl mb-6">⚠️</div>
+        <h1 className="font-display text-2xl font-semibold mb-3 text-amber-600">Integrity Check Failed</h1>
+        <p className="text-ink/60 text-sm mb-6">
+          This certificate was found in our database but its cryptographic signature does not match
+          the stored data. This may indicate the certificate record has been tampered with.
+          Please contact <strong>support@yuktiiai.in</strong> for manual verification.
+        </p>
+        <Link href="/verify" className="btn-ghost">Try another ID</Link>
+      </div>
+    );
+  }
+
   const { enrollment } = cert;
   const student = enrollment.student;
-  const track = enrollment.track;
-  const domain = track.domain;
+  const track   = enrollment.track;
+  const domain  = track.domain;
 
   const issueDate = new Date(cert.issueDate).toLocaleDateString('en-IN', {
     day: 'numeric',

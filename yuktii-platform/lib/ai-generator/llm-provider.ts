@@ -1,18 +1,19 @@
 /**
- * llm-provider.ts — Resilient Multi-Provider LLM Dispatcher
+ * llm-provider.ts — Platform AI Generator Multi-Provider LLM Dispatcher
  *
- * Tier 1: Google Gemini (gemini-3.6-flash, gemini-3.5-flash) — Primary for high reasoning & structured generation
- * Tier 2: Groq (openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b) — Ultra-fast LPU inference fallback
- * Tier 3: OpenRouter (free tier models) — Elastic pool fallback
- * Tier 4: Anthropic Claude (claude-3-5-sonnet, etc.) — Optional legacy fallback
+ * Provider tier order for scenario/content generation:
+ *   Tier 1: Google Gemini (gemini-2.0-flash, gemini-1.5-flash) — primary
+ *   Tier 2: Groq (openai/gpt-oss-120b, openai/gpt-oss-20b) — secondary
+ *   Tier 3: OpenRouter (free tier) — tertiary fallback
  *
- * Traceability: Logs provider and model used for every request:
- *   [ai-generator] Provider: GEMINI served response for <taskName> (model: <model>)
- *   [ai-generator] Provider: GROQ served response for <taskName> (model: <model>)
+ * Claude/Anthropic has been removed entirely (Phase 8).
+ * The @anthropic-ai/sdk import and all Claude call code has been deleted.
+ *
+ * Traceability: Every call logs provider and model used:
+ *   [ai-generator] GEMINI(gemini-2.0-flash) served response for <taskName>
  */
 
 import Groq from 'groq-sdk';
-import Anthropic from '@anthropic-ai/sdk';
 import { GEMINI_MODELS, GROQ_MODELS, OPENROUTER_MODELS, getModelName } from './getModel';
 import { AiGenerationError } from './AiGenerationError';
 
@@ -28,7 +29,7 @@ export interface LlmRequestOptions {
 export interface LlmResponse<T = any> {
   rawText: string;
   json: T;
-  provider: 'gemini' | 'groq' | 'openrouter' | 'claude';
+  provider: 'gemini' | 'groq' | 'openrouter';
   modelUsed: string;
 }
 
@@ -245,20 +246,6 @@ async function callOpenRouter<T = any>(
   };
 }
 
-// ── Claude Fallback ──────────────────────────────────────────────────────────
-
-let _lastAnthropicKey: string | null = null;
-let _anthropicClient: Anthropic | null = null;
-function getAnthropicClient(): Anthropic | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-  if (!_anthropicClient || _lastAnthropicKey !== apiKey) {
-    _lastAnthropicKey = apiKey;
-    _anthropicClient = new Anthropic({ apiKey });
-  }
-  return _anthropicClient;
-}
-
 // ── Dispatcher with Automatic Fallbacks ──────────────────────────────────────
 
 export async function generateWithFallback<T = any>(
@@ -273,7 +260,7 @@ export async function generateWithFallback<T = any>(
     for (const model of GEMINI_MODELS) {
       try {
         const result = await callGemini<T>(options, model, geminiApiKey);
-        console.log(`[ai-generator] Provider: GEMINI served response for ${taskName} (model: ${model})`);
+        console.log(`[ai-generator] GEMINI(${model}) served response for ${taskName}`);
         return result;
       } catch (err: any) {
         const msg = err?.message || String(err);
@@ -293,7 +280,7 @@ export async function generateWithFallback<T = any>(
     for (const model of candidateModels) {
       try {
         const result = await callGroq<T>(options, model, groq);
-        console.log(`[ai-generator] Provider: GROQ served response for ${taskName} (model: ${model})`);
+        console.log(`[ai-generator] GROQ(${model}) served response for ${taskName}`);
         return result;
       } catch (err: any) {
         const msg = err?.message || String(err);
@@ -312,41 +299,13 @@ export async function generateWithFallback<T = any>(
     for (const model of OPENROUTER_MODELS) {
       try {
         const result = await callOpenRouter<T>(options, model, openRouterApiKey);
-        console.log(`[ai-generator] Provider: OPENROUTER served response for ${taskName} (model: ${model})`);
+        console.log(`[ai-generator] OPENROUTER(${model}) served response for ${taskName}`);
         return result;
       } catch (err: any) {
         const msg = err?.message || String(err);
         errors.push(`OpenRouter(${model}): ${msg}`);
         console.warn(`[ai-generator] OpenRouter (${model}) failed for ${taskName}: ${msg}`);
       }
-    }
-  }
-
-  // ── Step 4: Anthropic Claude (Optional Fallback) ───────────────────────────
-  const anthropic = getAnthropicClient();
-  if (anthropic) {
-    try {
-      const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: options.maxTokens ?? 2000,
-        temperature: options.temperature ?? 0.7,
-        system: options.systemPrompt,
-        messages: [{ role: 'user', content: options.userPrompt }],
-      });
-      const rawText = response.content[0]?.type === 'text' ? response.content[0].text : '';
-      let parsedJson: T = undefined as unknown as T;
-      if (options.responseFormat === 'json_object') {
-        parsedJson = extractAndParseJson<T>(rawText);
-      }
-      console.log(`[ai-generator] Provider: CLAUDE served response for ${taskName}`);
-      return {
-        rawText,
-        json: parsedJson,
-        provider: 'claude',
-        modelUsed: 'claude-3-5-sonnet-20241022',
-      };
-    } catch (err: any) {
-      errors.push(`Claude: ${err?.message || String(err)}`);
     }
   }
 

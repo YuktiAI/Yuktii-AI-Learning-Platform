@@ -1,0 +1,11 @@
+# Scratch / debug scripts — not needed in production
+yuktii-platform/scratch/
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Root node_modules (if any)
+/node_modules/

@@ -58,10 +58,10 @@ export async function runOpenHandsEvaluation(params: {
     return runOpenHandsNative(params, repoContext);
   }
 
-  // ── Step 3: Claude fallback (Phase 1) ─────────────────────────────────────
-  // Full OpenHands-equivalent analysis via Claude's extended thinking mode.
+  // ── Step 3: LLM-based agentic fallback (role-based routing) ──────────────
+  // Full OpenHands-equivalent analysis via Groq → OpenRouter.
   // Replace with native OpenHands SDK once infra is set up.
-  logger.info('OpenHands SDK not in sandbox — using Claude agentic fallback', { evaluationId });
+  logger.info('OpenHands SDK not in sandbox — using LLM-based agentic fallback', { evaluationId });
   return runOpenHandsViaClaude(projectSpec, repoContext, deterministicSummary, domainSlug, evaluationId);
 }
 
@@ -186,7 +186,7 @@ Output a JSON object with this exact structure (no markdown, raw JSON only):
 
     const res = await callLlmWithFallback({
       taskName: 'openhands-analysis',
-      taskType: 'cognitive',
+      role: 'openhands',
       systemPrompt,
       userPrompt: prompt,
       temperature: 0.2,
@@ -206,7 +206,7 @@ Output a JSON object with this exact structure (no markdown, raw JSON only):
     logger.info(`OpenHands analysis complete via ${res.provider} (${res.modelUsed})`, { evaluationId, stage: 'openHands' });
     return parseOpenHandsOutput(rawResponse, evaluationId, { gaveUp: false, trajectory });
   } catch (err) {
-    logger.error('OpenHands Groq fallback failed', { evaluationId, error: String(err) });
+    logger.error('OpenHands LLM fallback failed', { evaluationId, error: String(err) });
     // Return a minimal valid result so the pipeline continues
     return {
       summary: 'Automated analysis could not complete due to API error. Scores based on deterministic checks.',

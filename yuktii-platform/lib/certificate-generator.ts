@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendMail } from "@/lib/mailer";
 import { uploadCertificatePdf } from "@/lib/cloud-storage";
 import { logError } from "@/lib/error-handler";
+import { generateCertificate } from "@/lib/certificate-integrity";
 
 export async function generateCertificatePdf(data: {
   studentName: string;
@@ -301,12 +302,15 @@ export async function generateAndDeliverCertificate(
       };
     }
 
-    // Generate unique public certificate ID (e.g. YUKTII-2026-AB12-CD34)
-    const year = new Date().getFullYear();
-    const randomHex = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const randomHex2 = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const publicCertificateId = `YUKTII-${year}-${randomHex}-${randomHex2}`;
+    // A-3: Generate UUID publicCertificateId + full-payload verificationHash.
+    // The hash binds to studentId|trackId|completionDate|finalScore — tamper-evident.
     const issueDate = new Date();
+    const { publicCertificateId, verificationHash } = generateCertificate({
+      studentId:      enrollment.student.id,
+      trackId:        enrollment.track.id,
+      completionDate: issueDate.toISOString().slice(0, 10), // YYYY-MM-DD
+      finalScore:     evaluation?.finalScore ?? 100,
+    });
 
     // 1. Generate PDF
     const pdfBuffer = await generateCertificatePdf({
@@ -327,7 +331,8 @@ export async function generateAndDeliverCertificate(
         enrollmentId,
         publicCertificateId,
         issueDate,
-        pdfUrl,  // S3 URL or base64 data URI depending on config
+        pdfUrl,
+        verificationHash, // A-3: full-payload HMAC stored separately
       },
     });
 

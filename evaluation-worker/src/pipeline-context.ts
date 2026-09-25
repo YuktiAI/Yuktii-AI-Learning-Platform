@@ -19,6 +19,9 @@ export interface DeterministicCheckResult {
   testsPassCount:     number;
   testsFailCount:     number;
   endpointsFound:     string[];
+  repoFileCount:      number;
+  sourceFileCount:    number;
+  sourceFiles:        string[];
   rawOutput:          string;
   checksPassedCount:  number;
   checksTotalCount:   number;
@@ -95,6 +98,14 @@ export interface MentorReport {
   nextSteps:    string[];
 }
 
+export interface AiUsageAnalysis {
+  policy:  string;
+  status:  'disclosed_or_marked' | 'no_explicit_markers' | 'suspected_ai_code';
+  warning: string | null;
+  markers: string[];
+  suspectedFiles: string[];   // files flagged as likely AI-generated
+}
+
 // ── The shared context ─────────────────────────────────────────────────────────
 
 export interface PipelineContext {
@@ -116,6 +127,15 @@ export interface PipelineContext {
   finalScore:           number | null;
   mentorReport:         MentorReport | null;
 
+  // Source code contents — populated by Stage 4 for use in LLM scoring
+  fileContentsMap:      Record<string, string>;   // filePath → content (capped)
+
+  // AI code detection — populated by Stage 4c
+  aiUsageAnalysis:      AiUsageAnalysis | null;
+
+  // Dynamic model answer — generated per-student in Stage 10b
+  dynamicModelAnswer:   string | null;
+
   // Resubmission diff (populated if resubmission)
   repoCommitSha:        string | null;  // HEAD commit at evaluation time
 
@@ -129,6 +149,15 @@ export interface PipelineContext {
   flaggedForHumanReview: boolean;
   humanReviewReason:    string | null;
   promptInjectionFlags: Array<{ pattern: string; location: string; snippet: string }>;
+
+  // Hard gate tracking (A-2 patch: don't overwrite finalScore, gate passed separately)
+  hardGateFailed:       boolean;
+  hardGateReason:       'build_failed' | 'req_pass_rate_below_threshold' | null;
+  requirementPassRate:  number | null;  // 0.0 – 1.0
+
+  // Sanity scorer tracking (A-1 patch: disagrement is flag-only, no score cap)
+  scorerDisagreementDelta: number | null;
+  passed:               boolean | null; // final pass/fail — gated by hardGateFailed AND score threshold
 
   // Error tracking
   stageErrors:          Record<string, string>;  // stage → error message
@@ -148,6 +177,9 @@ export function createPipelineContext(job: EvaluationJobData): PipelineContext {
     categoryScores:        null,
     finalScore:            null,
     mentorReport:          null,
+    fileContentsMap:       {},
+    aiUsageAnalysis:       null,
+    dynamicModelAnswer:    null,
     repoCommitSha:         null,
     harnessType:           null,
     harnessVersion:        null,
@@ -158,6 +190,11 @@ export function createPipelineContext(job: EvaluationJobData): PipelineContext {
     flaggedForHumanReview: false,
     humanReviewReason:     null,
     promptInjectionFlags:  [],
+    hardGateFailed:        false,
+    hardGateReason:        null,
+    requirementPassRate:   null,
+    scorerDisagreementDelta: null,
+    passed:                null,
     stageErrors:           {},
   };
 }

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, Mail, Eye, EyeOff, Shield } from "lucide-react";
@@ -26,8 +26,7 @@ export default function AdminLoginPage() {
         setErr(data.error || "Login failed");
         return;
       }
-      router.push("/admin-portal/dashboard");
-      router.refresh();
+      window.location.href = "/admin-portal/dashboard";
     } catch {
       setErr("Network error. Please try again.");
     } finally {

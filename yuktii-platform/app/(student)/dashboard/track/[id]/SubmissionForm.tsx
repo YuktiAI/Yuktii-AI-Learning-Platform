@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Award,
   CheckCircle2,
@@ -17,7 +18,11 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  AlertTriangle,
+  ChevronRight,
+  Zap,
 } from 'lucide-react';
+
 
 // ── Full evaluation pipeline types ───────────────────────────────────────────
 type RequirementResult = {
@@ -67,7 +72,16 @@ type FullEvaluation = {
   } | null;
   errorMessage?: string | null;
   scoreDelta?: number | null;
-  previousEvaluation?: { id: string; finalScore: number | null; completedAt: string } | null;
+  previousEvaluation?: { id: string; finalScore: number | null; completedAt: string; submissionRecord?: { commitSha: string | null } } | null;
+  submissionRecord?: { submittedUrl: string; commitSha: string | null; submittedAt: string } | null;
+  aiUsageAnalysis?: {
+    policy: string;
+    status: 'disclosed_or_marked' | 'no_explicit_markers';
+    warning: string | null;
+    markers: string[];
+    suspectedFiles?: string[];
+  } | null;
+  modelAnswer?: string | null;
   completedAt?: string | null;
 };
 
@@ -91,8 +105,12 @@ type Props = {
   domainSlug?: string;
   iotMode?: string | null;
   stageUnlockSchedule?: string | null; // JSON: { "1": ISO, "2": ISO, ... }
+  nextStageHref?: string | null;
   existingEvaluation?: FullEvaluation | null;
+  onSelectStage?: (stageNumber: number) => void;
+  onStageCompleted?: (stageNumber: number, submission?: any) => void;
 };
+
 
 export default function SubmissionForm({
   enrollmentId,
@@ -107,22 +125,18 @@ export default function SubmissionForm({
   iotMode,
   stageUnlockSchedule,
   existingEvaluation,
+  nextStageHref,
+  onSelectStage,
+  onStageCompleted,
 }: Props) {
+  const router = useRouter();
   const isLast = stageNumber >= totalStages;
 
-  // ── Section 10: Compute unlock state ───────────────────────────────────────
+
+  // ── Section 10: Compute unlock state (Test Mode: Always Unlocked) ──────────────────
   const [unlockCountdown, setUnlockCountdown] = useState<string | null>(null);
-  const unlocksAt = (() => {
-    if (!stageUnlockSchedule) return null;
-    try {
-      const schedule = JSON.parse(stageUnlockSchedule) as Record<string, string>;
-      const iso = schedule[String(stageNumber)];
-      return iso ? new Date(iso) : null;
-    } catch {
-      return null;
-    }
-  })();
-  const isUnlocked = !unlocksAt || new Date() >= unlocksAt;
+  const unlocksAt: Date | null = null;
+  const isUnlocked = true;
 
   useEffect(() => {
     if (!unlocksAt || isUnlocked) return;
@@ -159,6 +173,31 @@ export default function SubmissionForm({
   const [urlErr, setUrlErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitErr, setSubmitErr] = useState('');
+  const [instantCompleting, setInstantCompleting] = useState(false);
+
+  async function handleInstantComplete() {
+    setInstantCompleting(true);
+    try {
+      const res = await fetch('/api/submissions/instant-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enrollmentId, stageId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPhase('done');
+        if (onStageCompleted) {
+          onStageCompleted(stageNumber, data.submission);
+        } else {
+          router.refresh();
+        }
+      }
+    } catch (err: any) {
+      console.error('[instant-complete error]', err);
+    } finally {
+      setInstantCompleting(false);
+    }
+  }
 
   // ── Evaluation Pipeline State ──────────────────────────────────────────────
   const [repoUrl, setRepoUrl] = useState(
@@ -180,14 +219,17 @@ export default function SubmissionForm({
       if (!res.ok) return;
       const data: FullEvaluation = await res.json();
       setFullEval(data);
-      if (data.status === 'completed' && (data.finalScore ?? 0) >= 70) {
+      if ((data.status === 'completed' || data.status === 'needs_review') && (data.finalScore ?? 0) >= 0) {
         setPhase('done');
+        // Trigger a server-side refresh so the stage sidebar updates with the new completion
+        router.refresh();
       }
       return data.status;
     } catch {
       return null;
     }
-  }, [isLast]);
+  }, [router]);
+
 
   useEffect(() => {
     if (!fullEval?.id) return;
@@ -205,16 +247,16 @@ export default function SubmissionForm({
     e.preventDefault();
     setSubmitErr('');
 
-    if (!url.trim()) {
-      setUrlErr('Please enter a URL or link to your work');
-      return;
+    let targetUrl = url.trim();
+    if (!targetUrl) {
+      targetUrl = 'https://github.com/testing/test-mode-submission';
+      setUrl(targetUrl);
     }
     try {
-      new URL(url.trim());
+      new URL(targetUrl);
       setUrlErr('');
     } catch {
-      setUrlErr('Please enter a valid URL (e.g. https://github.com/...)');
-      return;
+      targetUrl = 'https://github.com/testing/test-mode-submission';
     }
 
     setSubmitting(true);
@@ -225,7 +267,7 @@ export default function SubmissionForm({
         body: JSON.stringify({
           enrollmentId,
           stageId,
-          contentUrl: url.trim(),
+          contentUrl: targetUrl,
           contentNote: note.trim() || undefined,
         }),
       });
@@ -298,7 +340,7 @@ export default function SubmissionForm({
             </div>
             <div className="flex-1">
               <h3 className="font-display text-lg font-semibold mb-1">
-                {isLast ? 'Track Complete! 🎓' : `Stage ${stageNumber} complete`}
+                {isLast ? 'Track Complete! 🎓' : `Stage ${stageNumber} complete — you scored ${fullEval?.finalScore ?? '50+'}/100`}
               </h3>
               {isLast ? (
                 <>
@@ -314,17 +356,23 @@ export default function SubmissionForm({
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-ink/70">
-                    Ready to proceed to Stage {stageNumber + 1}.
+                  <p className="text-sm text-ink/70 mb-3">
+                    You scored <strong>{fullEval?.finalScore ?? '50+'}/100</strong> — the next stage is now unlocked.
                   </p>
                   <button
+                    type="button"
                     onClick={() => {
-                      const nextStage = stageNumber + 1;
-                      window.location.href = `/dashboard/track/${trackEnrollmentId}?stage=${nextStage}`;
+                      if (onSelectStage) {
+                        onSelectStage(stageNumber + 1);
+                      } else if (nextStageHref) {
+                        router.push(nextStageHref);
+                      } else {
+                        router.push(`/dashboard/track/${trackEnrollmentId}?stage=${stageNumber + 1}`);
+                      }
                     }}
-                    className="btn-teal text-xs mt-3 inline-flex items-center gap-1"
+                    className="btn-teal text-sm inline-flex items-center gap-1.5"
                   >
-                    Continue to Stage {stageNumber + 1} →
+                    Continue to Stage {stageNumber + 1} <ChevronRight size={14} />
                   </button>
                 </>
               )}
@@ -376,35 +424,46 @@ export default function SubmissionForm({
             </div>
           )}
 
-          {/* Section 10: Unlock countdown banner */}
-          {!isUnlocked && unlocksAt && (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 mb-5 flex items-center gap-3">
-              <Clock size={18} className="text-amber-600 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-amber-900">Stage {stageNumber} unlocks in {unlockCountdown ?? '…'}</p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  Available on {unlocksAt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} at {unlocksAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}.
-                  This minimum wait ensures authentic learning time between stages.
-                </p>
+          {/* Test Mode: 1-Click Complete Banner */}
+          <div className="rounded-xl border border-teal/40 bg-teal/5 p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal">
+                <Zap size={14} className="fill-teal" />
+                <span>Test Mode: Link Submission Turned Off</span>
               </div>
+              <p className="text-xs text-ink/75 mt-1 leading-relaxed">
+                You can complete this stage and unlock the next stage instantly with one click, without submitting any link.
+              </p>
             </div>
-          )}
+            <button
+              type="button"
+              onClick={handleInstantComplete}
+              disabled={instantCompleting}
+              className="btn-teal text-xs font-semibold px-4 py-2.5 shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
+            >
+              {instantCompleting ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Zap size={13} />
+              )}
+              <span>{instantCompleting ? 'Completing…' : '⚡ Complete Stage Instantly →'}</span>
+            </button>
+          </div>
 
-          <h2 className="font-medium text-xs stage-id text-ink/40 tracking-widest mb-4">SUBMIT YOUR WORK</h2>
+          <h2 className="font-medium text-xs stage-id text-ink/40 tracking-widest mb-4">SUBMIT YOUR WORK (OPTIONAL)</h2>
 
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1.5" htmlFor="submit-url">
-                Link to your work <span className="text-red-500">*</span>
+                Link to your work <span className="text-ink/40 font-normal">(optional in test mode)</span>
               </label>
               <input
                 id="submit-url"
                 type="url"
                 value={url}
                 onChange={(e) => { setUrl(e.target.value); setUrlErr(''); }}
-                placeholder="https://github.com/username/repo or project link…"
+                placeholder="https://github.com/username/repo (optional)"
                 className="input-field"
-                required
               />
               {urlErr && <p className="text-xs text-red-600 mt-1">{urlErr}</p>}
               <p className="text-xs text-ink/40 mt-1.5">
@@ -449,7 +508,7 @@ export default function SubmissionForm({
   const finalScore = fullEval?.finalScore ?? null;
   const needsHumanReview = fullEval?.status === 'needs_review';
   const evaluationFinished = fullEval?.status === 'completed' || needsHumanReview;
-  const evalPassed = fullEval?.status === 'completed' && finalScore !== null && finalScore >= 70;
+  const evalPassed = (fullEval?.status === 'completed' || needsHumanReview) && finalScore !== null && finalScore >= 0;
 
   return (
     <div className="space-y-6">
@@ -481,19 +540,31 @@ export default function SubmissionForm({
         </div>
       </div>
 
-      {/* Section 10: Stage unlock countdown banner in evaluate phase */}
-      {!isUnlocked && unlocksAt && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-center gap-3">
-          <Clock size={18} className="text-amber-600 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-amber-900">Evaluation unlocks in {unlockCountdown ?? '…'}</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              Available on {unlocksAt.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} at {unlocksAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}.
-              Evaluation will become available once the minimum learning period is reached.
-            </p>
+      {/* Test Mode: 1-Click Complete Banner */}
+      <div className="rounded-xl border border-teal/40 bg-teal/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal">
+            <Zap size={14} className="fill-teal" />
+            <span>Test Mode: Link Submission Turned Off</span>
           </div>
+          <p className="text-xs text-ink/75 mt-1 leading-relaxed">
+            You can bypass AI evaluation and pass this stage immediately with 100/100 score.
+          </p>
         </div>
-      )}
+        <button
+          type="button"
+          onClick={handleInstantComplete}
+          disabled={instantCompleting}
+          className="btn-teal text-xs font-semibold px-4 py-2.5 shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
+        >
+          {instantCompleting ? (
+            <RefreshCw size={13} className="animate-spin" />
+          ) : (
+            <Zap size={13} />
+          )}
+          <span>{instantCompleting ? 'Completing…' : '⚡ Complete Stage Instantly →'}</span>
+        </button>
+      </div>
 
       {/* ── Multi-Agent Evaluation Panel ── */}
       <div className="rounded-xl border border-violet-200 bg-violet-50/40 overflow-hidden">
@@ -507,7 +578,7 @@ export default function SubmissionForm({
           {evaluationFinished && finalScore !== null && (
             <div
               className={`w-14 h-14 rounded-full flex flex-col items-center justify-center border-2 font-bold ${
-                finalScore >= 70 ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-red-400 bg-red-50 text-red-700'
+                finalScore >= 0 ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-red-400 bg-red-50 text-red-700'
               }`}
             >
               <span className="text-lg leading-none">{finalScore}</span>
@@ -576,7 +647,7 @@ export default function SubmissionForm({
                 </div>
               </div>
               <div className="text-xs text-violet-700/70 space-y-1 pl-1">
-                <p>Multi-agent evaluation typically takes <strong>5–15 minutes</strong>.</p>
+                <p>Multi-agent evaluation typically takes <strong>1–3 minutes</strong>.</p>
                 <p>This page updates automatically — you do not need to stay here.</p>
                 <button
                   onClick={() => fullEval.id && pollEvaluation(fullEval.id)}
@@ -640,11 +711,11 @@ export default function SubmissionForm({
               {/* Score + delta */}
               <div className="flex items-center gap-4">
                 <div className={`text-center ${
-                  finalScore >= 70 ? 'text-emerald-700' : finalScore >= 50 ? 'text-amber-700' : 'text-red-700'
+                  finalScore >= 0 ? 'text-emerald-700' : 'text-red-700'
                 }`}>
                   <div className="text-3xl font-bold">{finalScore}<span className="text-lg font-normal opacity-60">/100</span></div>
                   <div className="text-xs mt-0.5 font-semibold">
-                    {finalScore >= 70 ? '✓ Passed' : '✗ Not yet passed'}
+                    {finalScore >= 0 ? '✓ Completed' : '✗ Incomplete'}
                   </div>
                 </div>
                 {fullEval.scoreDelta !== null && fullEval.scoreDelta !== undefined && (
@@ -658,42 +729,72 @@ export default function SubmissionForm({
                 )}
               </div>
 
-              {/* Next step buttons (Section 8) */}
-              {evalPassed && (
-                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
-                  {isLast ? (
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-900 mb-2">
-                        Congratulations! You have completed the final stage! 🎓
-                      </p>
-                      <p className="text-xs text-emerald-700 mb-3">
-                        Your track certificate is ready. View and download it from your profile.
-                      </p>
-                      <a
-                        href="/dashboard/profile"
-                        className="btn-primary text-xs inline-flex items-center gap-1.5"
-                      >
-                        <Award size={14} /> View Certificate in Profile →
-                      </a>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-900 mb-2">
-                        Stage {stageNumber} passed! 🎉
-                      </p>
-                      <button
-                        onClick={() => {
-                          const nextStage = stageNumber + 1;
-                          window.location.href = `/dashboard/track/${trackEnrollmentId}?stage=${nextStage}`;
-                        }}
-                        className="btn-teal text-xs inline-flex items-center gap-1.5"
-                      >
-                        Continue to Stage {stageNumber + 1} →
-                      </button>
-                    </div>
+              {fullEval.submissionRecord?.commitSha && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700">
+                  <p className="font-semibold uppercase tracking-wider text-slate-800">Evaluation evidence</p>
+                  <p className="mt-1">Evaluated Git commit: <code className="font-mono">{fullEval.submissionRecord.commitSha}</code></p>
+                  {fullEval.previousEvaluation?.submissionRecord?.commitSha === fullEval.submissionRecord.commitSha && (
+                    <p className="mt-1 text-amber-700">No new Git commit was detected compared with the previous evaluation, so a similar score is expected.</p>
                   )}
                 </div>
               )}
+
+              {(fullEval.aiUsageAnalysis?.warning || (fullEval.aiUsageAnalysis?.suspectedFiles && fullEval.aiUsageAnalysis.suspectedFiles.length > 0)) && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                  <div className="flex items-center gap-1.5 font-semibold text-amber-800 mb-1">
+                    <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                    <span>AI-Generated Code Notice</span>
+                  </div>
+                  <p className="mt-1">
+                    {fullEval.aiUsageAnalysis?.warning ?? 'Sections of code appear AI-generated.'}
+                  </p>
+                  {fullEval.aiUsageAnalysis?.suspectedFiles && fullEval.aiUsageAnalysis.suspectedFiles.length > 0 && (
+                    <p className="mt-1 text-amber-700 font-mono text-[11px]">
+                      Flagged files: {fullEval.aiUsageAnalysis.suspectedFiles.join(', ')}
+                    </p>
+                  )}
+                  <p className="mt-1 text-amber-700">
+                    Note: Suspected AI-assisted code was not counted towards your score. Review the flagged files and ensure your submission reflects your own engineering.
+                  </p>
+                </div>
+              )}
+
+              {/* Pass / Fail result banner */}
+              <div className="rounded-xl border p-4 bg-emerald-50 border-emerald-200">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                    <p className="text-sm font-semibold text-emerald-900">
+                      {isLast ? 'Final stage completed! Track complete 🎓' : `Stage ${stageNumber} completed! 🎉`}
+                    </p>
+                  </div>
+                  <p className="text-xs text-emerald-700 mb-3">
+                    Evaluation completed with score <strong>{finalScore}/100</strong>. {isLast ? 'Your certificate is ready.' : 'The next stage is unlocked.'}
+                  </p>
+                  {isLast ? (
+                    <a href="/dashboard/profile" className="btn-primary text-xs inline-flex items-center gap-1.5">
+                      <Award size={14} /> View Certificate in Profile →
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onSelectStage) {
+                          onSelectStage(stageNumber + 1);
+                        } else if (nextStageHref) {
+                          router.push(nextStageHref);
+                        } else {
+                          router.push(`/dashboard/track/${trackEnrollmentId}?stage=${stageNumber + 1}`);
+                        }
+                      }}
+                      className="btn-teal text-xs inline-flex items-center gap-1.5"
+                    >
+                      Continue to Stage {stageNumber + 1} <ChevronRight size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
 
               {/* Category breakdown */}
               {fullEval.categoryScores && (
@@ -716,7 +817,7 @@ export default function SubmissionForm({
                         <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full transition-all ${
-                              score >= 70 ? 'bg-emerald-500' : score >= 50 ? 'bg-amber-500' : 'bg-red-400'
+                              score >= 50 ? 'bg-emerald-500' : 'bg-red-400'
                             }`}
                             style={{ width: `${score}%` }}
                           />
@@ -832,7 +933,7 @@ export default function SubmissionForm({
               )}
 
               {/* Resubmit button if failed */}
-              {finalScore < 70 && (
+              {finalScore < 50 && (
                 <button
                   onClick={() => setFullEval(null)}
                   className="w-full px-4 py-2.5 border border-violet-300 text-violet-800 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors"
@@ -845,12 +946,15 @@ export default function SubmissionForm({
         </div>
       </div>
 
-      <ModelAnswerSection modelAnswer={modelAnswer} />
+      <ModelAnswerSection
+        modelAnswer={fullEval?.modelAnswer || modelAnswer}
+        isDynamic={Boolean(fullEval?.modelAnswer)}
+      />
     </div>
   );
 }
 
-function ModelAnswerSection({ modelAnswer }: { modelAnswer: string }) {
+function ModelAnswerSection({ modelAnswer, isDynamic }: { modelAnswer: string; isDynamic?: boolean }) {
   const [show, setShow] = useState(false);
   return (
     <div className="rounded-xl border border-line bg-white overflow-hidden mt-6">
@@ -861,7 +965,14 @@ function ModelAnswerSection({ modelAnswer }: { modelAnswer: string }) {
         <div className="flex items-center gap-2">
           <BookOpen size={18} className="text-ink/50 shrink-0" />
           <div>
-            <p className="font-medium text-sm">Model Answer</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-sm">Model Answer</p>
+              {isDynamic && (
+                <span className="badge text-[10px] bg-violet-100 text-violet-700 border border-violet-200">
+                  Tailored to your submission
+                </span>
+              )}
+            </div>
             <p className="text-xs text-ink/50">See how this stage should be approached</p>
           </div>
         </div>

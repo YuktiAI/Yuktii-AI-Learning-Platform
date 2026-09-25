@@ -29,17 +29,18 @@ export default async function DashboardPage() {
   const session = await getSession();
   if (!session) redirect('/login');
 
-  const student = await prisma.student.findUnique({ where: { id: session.studentId } });
-
-  const rawEnrollments = await prisma.enrollment.findMany({
-    where: { studentId: session.studentId },
-    include: {
-      track: { include: { domain: true, stages: true } },
-      submissions: true,
-      certificate: true,
-    },
-    orderBy: { enrolledAt: 'desc' },
-  });
+  const [student, rawEnrollments] = await Promise.all([
+    prisma.student.findUnique({ where: { id: session.studentId } }),
+    prisma.enrollment.findMany({
+      where: { studentId: session.studentId },
+      include: {
+        track: { include: { domain: true, stages: true } },
+        submissions: true,
+        certificate: true,
+      },
+      orderBy: { enrolledAt: 'desc' },
+    }),
+  ]);
 
   // When payment gateway is disabled for testing, auto-treat pending payment as in progress
   const disablePayment = process.env.DISABLE_PAYMENT_GATEWAY !== 'false';
@@ -157,6 +158,7 @@ export default async function DashboardPage() {
                   ) : (
                     <Link
                       href={`/dashboard/track/${e.id}`}
+                      prefetch={true}
                       className={`${isComplete ? 'btn-ghost' : 'btn-primary'} text-sm`}
                     >
                       {isComplete ? 'View track' : completedStages === 0 ? 'Start track →' : 'Continue track →'}

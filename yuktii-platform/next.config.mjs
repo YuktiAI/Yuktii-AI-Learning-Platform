@@ -7,6 +7,9 @@ const nextConfig = {
       { protocol: 'https', hostname: '**.amazonaws.com' },
     ],
   },
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
+  },
   // Suppress BullMQ's optional @valkey/valkey-glide peer dep warning
   webpack: (config, { isServer }) => {
     if (isServer) {

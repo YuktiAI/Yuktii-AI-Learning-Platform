@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
 const navLinks = [
+  { href: '/', label: 'Home' },
   { href: '/#domains', label: 'Domains' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/about', label: 'About' },
@@ -55,7 +56,7 @@ export default function Navbar() {
         if (!cancelled) setSessionLoaded(true);
       });
     return () => { cancelled = true; };
-  }, [pathname]); // re-check on every page navigation
+  }, []); // Only check on mount to keep navigation instantaneous
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -105,15 +106,18 @@ export default function Navbar() {
 
         {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-6 text-sm" aria-label="Main navigation">
-          {navLinks.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="text-ink/70 hover:text-ink transition-colors font-medium"
-            >
-              {l.label}
-            </Link>
-          ))}
+          {navLinks.map((l) => {
+            const href = l.label === 'Home' && session.loggedIn ? '/home' : l.href;
+            return (
+              <Link
+                key={l.href}
+                href={href}
+                className="text-ink/70 hover:text-ink transition-colors font-medium"
+              >
+                {l.label}
+              </Link>
+            );
+          })}
           <Link
             href="/verify"
             className="stage-id text-xs text-teal hover:text-teal/80 transition-colors"
@@ -193,15 +197,18 @@ export default function Navbar() {
       {/* Mobile menu */}
       {open && (
         <div className="md:hidden border-t border-line bg-paper/98 backdrop-blur-md px-5 py-4 space-y-1 animate-fade-up">
-          {navLinks.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="block py-3 text-sm font-medium text-ink/80 hover:text-ink border-b border-line/50 last:border-0"
-            >
-              {l.label}
-            </Link>
-          ))}
+          {navLinks.map((l) => {
+            const href = l.label === 'Home' && session.loggedIn ? '/home' : l.href;
+            return (
+              <Link
+                key={l.href}
+                href={href}
+                className="block py-3 text-sm font-medium text-ink/80 hover:text-ink border-b border-line/50 last:border-0"
+              >
+                {l.label}
+              </Link>
+            );
+          })}
           <Link href="/verify" className="block py-3 text-sm stage-id text-teal border-b border-line/50">
             Verify a certificate ↗
           </Link>

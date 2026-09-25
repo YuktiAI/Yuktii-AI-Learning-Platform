@@ -31,6 +31,7 @@ import { retrieveSpec }           from './pipeline/02-retrieve-spec.js';
 import { createSandbox }          from './pipeline/03-create-sandbox.js';
 import { runDeterministicChecks } from './pipeline/04-deterministic-checks.js';
 import { scoreOnExecution }       from './pipeline/04b-score-on-execution.js';
+import { detectAiCode }           from './pipeline/04c-ai-code-detector.js';
 import { runOpenHands }           from './pipeline/05-openhands-eval.js';
 import { runSweAgentInvestigation } from './pipeline/06-swe-agent-investigation.js';
 import { analyzeGitHistory }      from './pipeline/07-git-history.js';
@@ -38,6 +39,7 @@ import { scoreRequirements }      from './pipeline/08-requirement-scoring.js';
 import { computeFinalScore }      from './pipeline/09-score-engine.js';
 import { runSanityScorer }        from './pipeline/09b-sanity-scorer.js';
 import { generateMentorReport }   from './pipeline/10-mentor-report.js';
+import { generateModelAnswer }    from './pipeline/10b-model-answer.js';
 import { saveResults }            from './pipeline/11-save-results.js';
 import { destroySandbox }         from './sandbox/e2b-sandbox.js';
 
@@ -91,9 +93,16 @@ async function runEvaluationPipeline(
     await updateStageLabel(evaluationId, 'Running deterministic checks…');
     await runDeterministicChecks(ctx);
 
-    // ── Stage 4b: Execution-based scoring (Section 9.3) ──────────────────────
-    await updateStageLabel(evaluationId, 'Executing code and test suites…');
-    await scoreOnExecution(ctx);
+    // ── Stage 4c: AI Code Detection ──────────────────────────────────────────
+    await updateStageLabel(evaluationId, 'Analyzing code patterns & checking for AI markers…');
+    await detectAiCode(ctx);
+
+    // ── Stage 4b & Stage 7: Execution-based scoring & Git history (parallel) ─
+    await updateStageLabel(evaluationId, 'Executing code, tests & analysing git history…');
+    await Promise.all([
+      scoreOnExecution(ctx),
+      analyzeGitHistory(ctx),
+    ]);
 
     // ── Determine harness type (Section 9.2) ────────────────────────────────
     const stageRecord = await prisma.stage.findUnique({
@@ -105,7 +114,7 @@ async function runEvaluationPipeline(
 
     if (ctx.harnessType === 'broad') {
       // ── Stage 5: OpenHands broad evaluation ───────────────────────────────
-      await updateStageLabel(evaluationId, 'OpenHands broad evaluation (this may take several minutes)…');
+      await updateStageLabel(evaluationId, 'OpenHands broad evaluation…');
       await runOpenHands(ctx);
 
       // ── Stage 6: mini-SWE-agent focused investigation ──────────────────────
@@ -122,10 +131,6 @@ async function runEvaluationPipeline(
       await runSweAgentInvestigation(ctx);
     }
 
-    // ── Stage 7: Git history analysis ───────────────────────────────────────
-    await updateStageLabel(evaluationId, 'Analysing git history…');
-    await analyzeGitHistory(ctx);
-
     // ── Stage 8: Requirement-by-requirement scoring ──────────────────────────
     await updateStageLabel(evaluationId, 'Scoring requirements…');
     await scoreRequirements(ctx);
@@ -141,6 +146,10 @@ async function runEvaluationPipeline(
     // ── Stage 10: Mentor report ──────────────────────────────────────────────
     await updateStageLabel(evaluationId, 'Generating mentor report…');
     await generateMentorReport(ctx);
+
+    // ── Stage 10b: Dynamic Model Answer ──────────────────────────────────────
+    await updateStageLabel(evaluationId, 'Generating project model answer…');
+    await generateModelAnswer(ctx);
 
     // ── Stage 11: Save results + trigger certificate ─────────────────────────
     await updateStageLabel(evaluationId, 'Saving results…');
@@ -232,6 +241,23 @@ const worker = new Worker<EvaluationJobData, EvaluationJobResult>(
   {
     connection: makeRedisConnection(),
     concurrency: WORKER_CONCURRENCY,
+    // ── A3 patch: extend lock duration to 15 minutes ──────────────────────
+    // Default is 30 seconds — a full evaluation takes 2-5 minutes minimum.
+    // Without this, BullMQ considers the job stalled and re-queues it while
+    // the original worker is still running → double evaluation.
+    //
+    // 15 minutes (900,000ms) gives enough headroom for:
+    //   - E2B sandbox creation (~30s)
+    //   - Deterministic checks (~30s)
+    //   - OpenHands analysis (~2-3min)
+    //   - mini-SWE-agent investigation (~1-2min)
+    //   - Requirement scoring + score engine (~1min)
+    //   - Mentor report + model answer (~1-2min)
+    //   - Total: ~8-10min headroom
+    //
+    // The job-level EVALUATION_TIMEOUT_MS hard abort is separate from this lock.
+    lockDuration: 15 * 60 * 1000, // 15 minutes in milliseconds
+    lockRenewTime: 5 * 60 * 1000, // Renew lock every 5 minutes automatically
   }
 );
 

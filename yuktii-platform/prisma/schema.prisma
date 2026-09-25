@@ -2,6 +2,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Second generator: keeps the evaluation-worker's own Prisma client in sync.
+// Run `npx prisma generate` from yuktii-platform/ to update both.
+generator workerClient {
+  provider = "prisma-client-js"
+  output   = "../../evaluation-worker/node_modules/.prisma/client"
+}
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")        // pooled URL — used by Next.js serverless functions
@@ -216,6 +223,9 @@ model Certificate {
   issueDate           DateTime   @default(now())
   pdfUrl              String?
   qrCodeUrl           String?
+  // A-3: Full-payload HMAC-SHA256 (64 hex chars). Null for certs issued before A-3.
+  // Binds to studentId|trackId|completionDate|finalScore — tamper-evident.
+  verificationHash    String?
 }
 
 // Short-lived email/SMS verification codes. Database storage keeps verification
@@ -392,6 +402,9 @@ model Evaluation {
 
   // Mentor report
   mentorReport         String?
+
+  // Dynamic model answer
+  modelAnswer          String?
 
   // Resubmission tracking
   previousEvaluationId String?
