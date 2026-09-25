@@ -1,23 +1,24 @@
 export const GEMINI_MODELS = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-3.6-flash',
-  'gemini-3-flash-preview',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
 ];
 
 export const GROQ_MODELS = [
-  'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
-  'qwen/qwen3.8-27b',
-  'groq/compound',
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'mixtral-8x7b-32768',
 ];
 
 export const OPENROUTER_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'mistralai/mistral-7b-instruct:free',
   'liquid/lfm-2.5-2.6b:free',
 ];
 
 export const MODEL_CANDIDATES = GROQ_MODELS;
 
 export function getModelName(): string {
-  return process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+  return process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 }
+

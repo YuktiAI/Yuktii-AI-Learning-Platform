@@ -121,8 +121,12 @@ export default async function VerifyCertificatePage({ params }: Props) {
       <div className="rounded-2xl border-2 border-line bg-white shadow-xl overflow-hidden">
         {/* Gradient header */}
         <div className={`bg-gradient-to-r ${gradient} p-8 text-white text-center`}>
-          <div className="text-4xl mb-2">🏅</div>
-          <p className="text-white/70 text-xs stage-id tracking-widest mb-2">CERTIFICATE OF COMPLETION</p>
+          <div className="flex justify-center mb-3">
+            <div className="bg-white/95 px-4 py-1.5 rounded-xl shadow-sm inline-block">
+              <img src="/logo-full.png" alt="Yuktii AI Labs" className="h-7 w-auto object-contain" />
+            </div>
+          </div>
+          <p className="text-white/80 text-xs stage-id tracking-widest mb-1.5 uppercase font-medium">Certificate of Completion</p>
           <h1 className="font-display text-2xl font-semibold">{track.certificateName}</h1>
         </div>
 

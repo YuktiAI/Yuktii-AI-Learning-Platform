@@ -12,7 +12,7 @@ if (process.env.NODE_ENV === 'production') {
 
 export async function POST(req: NextRequest) {
   // ── Hard production gate ──────────────────────────────────────────────────
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' || process.env.DISABLE_PAYMENT_GATEWAY === 'false') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 

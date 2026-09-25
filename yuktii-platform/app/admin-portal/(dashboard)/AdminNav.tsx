@@ -37,12 +37,16 @@ export default function AdminNav({ userEmail }: { userEmail: string }) {
   const navContent = (
     <div className="flex flex-col h-full bg-white">
       {/* Brand Header */}
-      <div className="px-5 py-6 border-b border-line">
-        <p className="text-[11px] tracking-widest text-ink/40 uppercase font-semibold">
-          Yuktii AI Labs
-        </p>
-        <p className="text-base font-bold text-ink mt-0.5">Admin Portal</p>
-        <p className="text-xs text-ink/50 mt-1 truncate" title={userEmail}>
+      <div className="px-5 py-5 border-b border-line">
+        <Link href="/admin-portal" className="block mb-3">
+          <img
+            src="/logo-full.png"
+            alt="Yuktii AI Labs"
+            className="h-8 w-auto object-contain"
+          />
+        </Link>
+        <p className="text-xs font-bold text-ink uppercase tracking-wider">Admin Portal</p>
+        <p className="text-[11px] text-ink/50 mt-0.5 truncate" title={userEmail}>
           {userEmail}
         </p>
       </div>
@@ -86,12 +90,13 @@ export default function AdminNav({ userEmail }: { userEmail: string }) {
   return (
     <>
       {/* Mobile Top Navbar */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white border-b border-line sticky top-0 z-30">
-        <div>
-          <p className="text-[10px] tracking-widest text-ink/40 uppercase font-semibold">
-            Yuktii AI Labs
-          </p>
-          <p className="text-sm font-bold text-ink leading-tight">Admin Portal</p>
+      <div className="md:hidden flex items-center justify-between px-4 py-2.5 bg-white border-b border-line sticky top-0 z-30">
+        <div className="flex items-center gap-2.5">
+          <img src="/logo-mark.png" alt="Yuktii AI Labs" className="h-7 w-7 object-contain" />
+          <div>
+            <p className="text-xs font-bold text-ink leading-tight">Admin Portal</p>
+            <p className="text-[10px] text-ink/40 tracking-wider uppercase font-semibold">Yuktii AI Labs</p>
+          </div>
         </div>
         <button
           onClick={() => setMobileOpen(true)}

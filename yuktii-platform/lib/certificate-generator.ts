@@ -83,17 +83,39 @@ export async function generateCertificatePdf(data: {
     });
   }
 
-  // ── Header Text ──
-  // YUKTII AI LABS
-  const orgTitle = "YUKTII AI LABS";
-  const orgTitleWidth = fontBold.widthOfTextAtSize(orgTitle, 22);
-  page.drawText(orgTitle, {
-    x: (width - orgTitleWidth) / 2,
-    y: height - 75,
-    size: 22,
-    font: fontBold,
-    color: rgb(0.08, 0.1, 0.2),
-  });
+  // ── Header Logo / Text ──
+  let logoDrawn = false;
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const logoPath = path.join(process.cwd(), 'public', 'logo-full.png');
+    if (fs.existsSync(logoPath)) {
+      const logoBytes = fs.readFileSync(logoPath);
+      const logoImage = await pdfDoc.embedPng(logoBytes);
+      const scaled = logoImage.scale(0.14);
+      page.drawImage(logoImage, {
+        x: (width - scaled.width) / 2,
+        y: height - 78,
+        width: scaled.width,
+        height: scaled.height,
+      });
+      logoDrawn = true;
+    }
+  } catch (e) {
+    logoDrawn = false;
+  }
+
+  if (!logoDrawn) {
+    const orgTitle = "YUKTII AI LABS";
+    const orgTitleWidth = fontBold.widthOfTextAtSize(orgTitle, 22);
+    page.drawText(orgTitle, {
+      x: (width - orgTitleWidth) / 2,
+      y: height - 75,
+      size: 22,
+      font: fontBold,
+      color: rgb(0.08, 0.1, 0.2),
+    });
+  }
 
   // Subtitle
   const subOrg = "ADVANCED AGENTIC LEARNING & EVALUATION PLATFORM";

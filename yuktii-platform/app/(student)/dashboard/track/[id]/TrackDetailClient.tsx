@@ -67,6 +67,44 @@ export default function TrackDetailClient({
   const [isTrackComplete, setIsTrackComplete] = useState(initialIsTrackComplete);
   const [isPending, startTransition] = useTransition();
 
+  // Dynamic AI Stage Content management
+  const [stageContents, setStageContents] = useState<Record<number, any>>(allStageContents || {});
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+
+  const fetchStageContent = React.useCallback(async (stageNum: number) => {
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      const res = await fetch(`/api/enrollments/stage-content?enrollmentId=${enrollment.id}&stageNumber=${stageNum}`);
+      const data = await res.json();
+      if (res.ok && data.ok && data.content) {
+        setStageContents((prev) => ({
+          ...prev,
+          [stageNum]: data.content,
+        }));
+      } else {
+        setGenerationError(data.error || 'Failed to generate stage scenario. Please try again.');
+      }
+    } catch (e: any) {
+      setGenerationError(e?.message || 'Network error while fetching stage scenario.');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [enrollment.id]);
+
+  React.useEffect(() => {
+    const existing = stageContents[activeStageNumber];
+    if (
+      !existing ||
+      existing.generationStatus === 'FAILED' ||
+      !existing.problemStatement ||
+      existing.problemStatement.includes('Your personalised project scenario will appear here')
+    ) {
+      fetchStageContent(activeStageNumber);
+    }
+  }, [activeStageNumber, fetchStageContent]);
+
   // Instant stage selection handler — 0ms lag!
   function handleSelectStage(stageNum: number) {
     if (stageNum < 1 || stageNum > stages.length) return;
@@ -122,20 +160,12 @@ export default function TrackDetailClient({
       }
     : null;
 
-  // Pre-loaded or instant structured content
-  const stageContent = currentStage ? allStageContents[currentStage.stageNumber] || {
-    problemStatement: currentStage.taskTemplate || `Implement the requirements for Stage ${currentStage.stageNumber}.`,
-    requirements: [
-      `Implement core stage features and functional components for ${currentStage.title}.`,
-      `Structure clean, modular code with appropriate error handling and documentation.`,
-      `Verify tests and ensure clean build output.`
-    ],
-    acceptanceCriteria: [
-      `All functional requirements for ${currentStage.title} are met.`,
-      `Code runs cleanly with no critical warnings.`
-    ],
-    estimatedEffort: '2-3 hours',
-  } : null;
+  // Currently resolved stage content (real AI-generated only)
+  const rawContent = currentStage ? stageContents[currentStage.stageNumber] : null;
+  const stageContent = (rawContent && rawContent.problemStatement && !rawContent.problemStatement.includes('Your personalised project scenario will appear here'))
+    ? rawContent
+    : null;
+
 
   const rubric = (() => {
     try {
@@ -355,12 +385,37 @@ export default function TrackDetailClient({
                   )}
                 </div>
 
-                {stageContent && (
+                {isGenerating && (
+                  <div className="py-10 px-6 text-center">
+                    <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-sm font-semibold text-ink">Personalising Your Stage Assignment</p>
+                    <p className="text-xs text-ink/65 mt-1 max-w-md mx-auto">
+                      Our AI curriculum engine is synthesizing a concrete, industry-aligned scenario for this milestone. This takes just a few seconds…
+                    </p>
+                  </div>
+                )}
+
+                {generationError && !isGenerating && (
+                  <div className="py-6 px-4 text-center">
+                    <AlertTriangle className="text-rose-500 mx-auto mb-2" size={24} />
+                    <p className="text-sm font-semibold text-rose-900">Custom scenario generation unavailable</p>
+                    <p className="text-xs text-rose-700 mt-1 mb-3">{generationError}</p>
+                    <button
+                      type="button"
+                      onClick={() => fetchStageContent(activeStageNumber)}
+                      className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition"
+                    >
+                      <RefreshCw size={12} /> Retry Generation
+                    </button>
+                  </div>
+                )}
+
+                {stageContent && !isGenerating && (
                   <div className="space-y-5">
                     {/* Problem statement */}
                     <div>
                       <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Problem Statement</p>
-                      <p className="text-ink/85 leading-relaxed text-sm">{stageContent.problemStatement}</p>
+                      <p className="text-ink/85 leading-relaxed text-sm whitespace-pre-wrap">{stageContent.problemStatement}</p>
                     </div>
 
                     {/* Requirements list */}

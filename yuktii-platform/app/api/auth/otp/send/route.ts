@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     console.log(`\n[OTP] ${via.toUpperCase()} → ${contact} : ${otp}  (${type})\n`);
 
     if (via === 'email') {
-      await sendMail({
+      const sendResult = await sendMail({
         to: contact,
         subject: type === 'signup'
           ? 'Your Yuktii AI Labs sign-up OTP'
@@ -33,6 +33,13 @@ export async function POST(req: NextRequest) {
         html: otpEmailHtml(otp, type),
         text: `Your Yuktii AI Labs OTP is: ${otp}\nExpires in 10 minutes. Do not share it with anyone.`,
       });
+
+      if (!sendResult.success) {
+        console.error(`[OTP] Email delivery failed for ${contact}: ${sendResult.error}`);
+        return NextResponse.json({
+          error: `Failed to send OTP email: ${sendResult.error || 'Email service error. Please verify server email configuration.'}`,
+        }, { status: 500 });
+      }
     } else {
       console.warn(`[OTP] SMS not yet configured. OTP for ${contact}: ${otp}`);
     }

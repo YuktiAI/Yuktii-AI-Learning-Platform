@@ -94,14 +94,25 @@ export default function Navbar() {
       }`}
     >
       <div className="mx-auto max-w-6xl px-5 h-16 flex items-center justify-between">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 group" aria-label="Yuktii AI Labs Home">
-          <div className="w-8 h-8 rounded-md bg-ink flex items-center justify-center">
-            <span className="text-marigold font-display font-bold text-sm">Y</span>
+        {/* Brand Logo */}
+        <Link href="/" className="flex items-center group py-1" aria-label="Yuktii AI Labs Home">
+          {/* Full horizontal lockup on desktop and tablet */}
+          <img
+            src="/logo-full.png"
+            alt="Yuktii AI Labs"
+            className="h-10 w-auto object-contain hidden sm:block"
+          />
+          {/* Square Om mark on compact mobile */}
+          <div className="flex items-center gap-2 sm:hidden">
+            <img
+              src="/logo-mark.png"
+              alt="Yuktii AI Labs"
+              className="h-8 w-8 object-contain"
+            />
+            <span className="font-display text-base font-bold tracking-tight">
+              Yuktii<span className="text-marigold">.</span>AI
+            </span>
           </div>
-          <span className="font-display text-base font-semibold tracking-tight">
-            Yuktii<span className="text-marigold">.</span>AI Labs
-          </span>
         </Link>
 
         {/* Desktop Nav */}

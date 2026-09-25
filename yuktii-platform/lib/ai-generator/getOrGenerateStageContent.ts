@@ -79,14 +79,15 @@ export async function getOrGenerateStageContent(params: {
     throw new AiGenerationError('master', 'Stored master project JSON is invalid');
   }
 
-  // ── Step 3: Generate stage content (Fast with instant fallback) ──────────
+  // ── Step 3: Generate stage content (Real multi-provider generation) ──────
   let structuredResult;
   try {
-    // Attempt generation with a quick timeout (1.8s) so we never block page response
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Stage generation timeout - using instant fallback')), 1800)
-    );
     const { generateStructuredStageContent } = await import('./structured-generation');
+    // Allow up to 35 seconds for LLM generation (Pass 1 + Pass 2 critique)
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Stage generation exceeded 35s timeout across providers')), 35000)
+    );
+
     structuredResult = await Promise.race([
       generateStructuredStageContent({
         domainName,
@@ -99,39 +100,30 @@ export async function getOrGenerateStageContent(params: {
       timeoutPromise,
     ]);
   } catch (err: any) {
-    console.log('[getOrGenerateStageContent] Using instant structured stage fallback for fast render:', err?.message || err);
-    const defaultReqs = learningObjectives
-      ? learningObjectives.split(/[.\n;]/).map(s => s.trim()).filter(s => s.length > 5)
-      : [
-          `Implement the core architectural modules for Stage ${stageNumber}.`,
-          `Ensure proper error handling, unit tests, and validation.`,
-          `Document API contracts and setup instructions in the README.`
-        ];
+    const errMsg = err?.message || String(err);
+    console.error(`[getOrGenerateStageContent] Generation FAILED for enrollment ${enrollmentId} stage ${stageNumber}:`, errMsg);
 
-    structuredResult = {
-      content: {
-        title: `Stage ${stageNumber}: Core Implementation`,
-        problemStatement: masterProject?.scenario || `Implement the technical specifications for Stage ${stageNumber} within ${domainName}.`,
-        learningObjectives: defaultReqs,
-        difficultyTier: 'applied' as const,
-        nonTechnicalExplanation: `In this stage, you implement and test the core components for the ${domainName} project.`,
-        technicalExplanation: `Implement clean modular architecture, handle data flow and error handling.`,
-        requirements: defaultReqs.slice(0, 5),
-        acceptanceCriteria: [
-          `All requirements for Stage ${stageNumber} are implemented.`,
-          `Code executes cleanly without uncaught exceptions.`
-        ],
-        expectedFileStructure: ['src/', 'tests/', 'README.md'],
-        starterFiles: {},
-        hiddenTestCases: [],
-        passFailCriteria: { mustPass: ['All requirements complete'], shouldPass: ['Clean execution'] },
-        resourceTags: [domainSlug],
-        estimatedEffort: '2-3 hours',
+    // Save a FAILED record in DB so it can be retried and tracked
+    await prisma.stageGeneratedContent.upsert({
+      where: { enrollmentId_stageNumber: { enrollmentId, stageNumber } },
+      update: { generationStatus: 'FAILED' },
+      create: {
+        enrollmentId,
+        stageNumber,
+        title: `Stage ${stageNumber}`,
+        problemStatement: '',
+        requirements: '[]',
+        resourceTags: '[]',
+        resourceLinkIds: '[]',
+        acceptanceCriteria: '[]',
+        generationStatus: 'FAILED',
       },
-      critique: { approved: true, score: 95, solvable: true, leaksSolution: false, selfContained: true, plainLanguageClear: true, critiqueNotes: 'Instant fallback model', suggestedFixes: [] },
-      modelUsed: 'instant-template',
-      version: 'v2.0-instant',
-    };
+    }).catch(() => {});
+
+    throw new AiGenerationError(
+      'stage_content',
+      `Failed to generate custom stage scenario: ${errMsg}. Please try again.`
+    );
   }
 
   const generated = structuredResult.content;

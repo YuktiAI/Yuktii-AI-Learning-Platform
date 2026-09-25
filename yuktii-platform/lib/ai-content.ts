@@ -176,11 +176,10 @@ export async function generateStaticStageContent(
     plainLanguageIntro:
       `Welcome to Stage ${stageNumber}${isWarmUp ? ' (Warm-Up)' : isCapstone ? ' (Industry Project)' : ''} of your ${domainName} ${levelName} track. ` +
       (isWarmUp
-        ? 'This first stage is designed to get you comfortable with the tools and project you will be working on throughout the track. Your personalised project scenario will appear here — take time to understand it before you begin. '
+        ? 'This stage establishes your core project architecture, development workflow, and foundation deliverables. Review the milestone specification below before starting.'
         : isCapstone
-        ? 'This final stage is your industry project — a full, realistic, production-flavored version of your assigned scenario. Treat this as you would a deliverable for a real employer. '
-        : 'In this stage you will apply real techniques to your ongoing project scenario. Read the task brief carefully and reference what you built in previous stages. ') +
-      'Your AI-personalised task will appear below when this stage is unlocked.',
+        ? 'This final stage is your comprehensive industry capstone — integrating all technical components built across earlier milestones into a cohesive, production-grade deliverable.'
+        : 'In this milestone, you will implement technical features and data flows building directly on your previous stage outputs.'),
     learningObjectives:
       `Apply core ${domainName} techniques to a structured real-world problem\n` +
       'Produce clean, documented, working deliverables\n' +
@@ -189,13 +188,13 @@ export async function generateStaticStageContent(
       (isCapstone ? 'Deliver a production-quality, professionally documented project suitable for portfolio inclusion' : ''),
     taskTemplate:
       `TASK — Stage ${stageNumber}: ${title} [${roleLabel.toUpperCase()}]\n\n` +
-      'Your personalised project scenario will appear here when you open this stage.\n\n' +
+      `Implement the core architectural modules and functionality required for Stage ${stageNumber} in ${domainName}.\n\n` +
       'Deliverables (all required):\n' +
-      '1. Public GitHub repository or Google Colab notebook\n' +
-      '2. README explaining what you built and how to run it\n' +
-      '3. Working evidence: screenshots, test output, or live URL\n' +
-      '4. Short reflection (3-5 sentences)\n\n' +
-      'Submit a public URL. The AI evaluator will check your link.',
+      '1. Public GitHub repository or Google Colab notebook with working code\n' +
+      '2. Comprehensive README explaining setup, usage, and architectural decisions\n' +
+      '3. Working verification: test results, console logs, or hosted service links\n' +
+      '4. Brief engineering reflection explaining technical tradeoffs\n\n' +
+      'Submit a public repository URL for AI-assisted automated evaluation.',
     modelAnswer:
       `A strong Stage ${stageNumber} (${roleLabel}) submission demonstrates:\n\n` +
       `1. Correct implementation of the core ${title} requirement\n` +
