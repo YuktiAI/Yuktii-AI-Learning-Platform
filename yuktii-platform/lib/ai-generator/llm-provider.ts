@@ -2,15 +2,12 @@
  * llm-provider.ts — Platform AI Generator Multi-Provider LLM Dispatcher
  *
  * Provider tier order for scenario/content generation:
- *   Tier 1: Google Gemini (gemini-2.0-flash, gemini-1.5-flash) — primary
+ *   Tier 1: Google Gemini (gemini-3.1-flash-lite, gemini-3.8-flash) — primary
  *   Tier 2: Groq (openai/gpt-oss-120b, openai/gpt-oss-20b) — secondary
  *   Tier 3: OpenRouter (free tier) — tertiary fallback
  *
- * Claude/Anthropic has been removed entirely (Phase 8).
- * The @anthropic-ai/sdk import and all Claude call code has been deleted.
- *
  * Traceability: Every call logs provider and model used:
- *   [ai-generator] GEMINI(gemini-2.0-flash) served response for <taskName>
+ *   [ai-generator] GEMINI(gemini-3.1-flash-lite) served response for <taskName>
  */
 
 import Groq from 'groq-sdk';
@@ -265,7 +262,12 @@ export async function generateWithFallback<T = any>(
       } catch (err: any) {
         const msg = err?.message || String(err);
         errors.push(`Gemini(${model}): ${msg}`);
-        if (msg.includes('404') || msg.includes('no longer available') || msg.includes('not found')) {
+        // Skip to next model on: 404 not found, 503 overloaded, rate limit, or quota errors
+        const isSkippable = msg.includes('404') || msg.includes('no longer available') || msg.includes('not found')
+          || msg.includes('503') || msg.includes('overload') || msg.includes('unavailable')
+          || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota');
+        if (isSkippable) {
+          console.warn(`[ai-generator] Gemini (${model}) skipped for ${taskName}: ${msg.slice(0, 120)}`);
           continue;
         }
         console.warn(`[ai-generator] Gemini (${model}) failed for ${taskName}: ${msg}`);
