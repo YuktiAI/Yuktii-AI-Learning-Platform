@@ -92,8 +92,6 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
       harnessVersion:          ctx.harnessVersion ?? '1.0',
       sanityScore:             ctx.sanityScore ?? null,
       sanityDiff:              ctx.sanityDiff ?? null,
-      // A-1: store the real unmodified score delta between scorers for admin review queue
-      scorerDisagreementDelta: ctx.scorerDisagreementDelta ?? null,
       flaggedForHumanReview:   needsReview,
       humanReviewReason:       ctx.humanReviewReason ?? null,
       agentTrajectory:         ctx.agentTrajectory.length > 0 ? JSON.stringify(ctx.agentTrajectory) : null,

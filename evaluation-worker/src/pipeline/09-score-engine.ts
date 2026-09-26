@@ -115,7 +115,7 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
     scoreDelta = ctx.finalScore - resubmission.previousFinalScore;
   }
 
-  // Persist the real score + hard gate metadata
+  // Persist the real score
   const prisma = getPrisma();
   await prisma.evaluation.update({
     where: { id: evaluationId },
@@ -123,12 +123,7 @@ export async function computeFinalScore(ctx: PipelineContext): Promise<void> {
       finalScore:     ctx.finalScore,
       categoryScores: JSON.stringify(categoryScores),
       scoreDelta:     scoreDelta,
-      // Store hard gate state so admin queue and mentor report can reference it
-      ...(hardGateFailed ? {
-        hardGateFailed: true,
-        hardGateReason: hardGateReason,
-      } : {}),
-    } as any,
+    },
   });
 
   logger.info('Final score computed', {

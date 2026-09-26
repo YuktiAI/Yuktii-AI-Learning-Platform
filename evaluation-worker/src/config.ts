@@ -38,7 +38,7 @@ export const MODEL_OPENHANDS         = 'openai/gpt-oss-120b';  // Groq — broad
 export const MODEL_SWE_AGENT         = 'openai/gpt-oss-120b';  // Groq — focused investigation
 export const MODEL_REQ_SCORING       = 'openai/gpt-oss-120b';  // Groq — FAIL-CLOSED (no fallback)
 export const MODEL_FAST_CHECK        = 'openai/gpt-oss-20b';   // Groq — short prompts, fast
-export const MODEL_SANITY_SCORER     = 'gemini-2.0-flash';     // Gemini — MUST stay Gemini-first
+export const MODEL_SANITY_SCORER     = 'gemini-3.1-flash-lite'; // Gemini — MUST stay Gemini-first
 export const MODEL_MENTOR_REPORT     = 'openai/gpt-oss-120b';  // Groq → Gemini fallback
 export const MODEL_CEREBRAS_FALLBACK = 'llama-3.3-70b';        // Cerebras (verify ID at https://inference-docs.cerebras.ai/models)
 
