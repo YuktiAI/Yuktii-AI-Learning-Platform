@@ -58,16 +58,14 @@ export default async function ProfilePage() {
   if (!student) redirect("/login");
 
   const profileIncomplete = !student.phone || student.degreeProgram === "Other";
-  const disablePayment = process.env.DISABLE_PAYMENT_GATEWAY !== "false";
 
   const domainMap = new Map<string, { domainName: string; domainSlug: string; enrollments: any[] }>();
   for (const e of student.enrollments) {
-    const effectiveStatus = disablePayment && e.status === "PENDING_PAYMENT" ? "IN_PROGRESS" : e.status;
     const key = e.track.domain.id;
     if (!domainMap.has(key)) {
       domainMap.set(key, { domainName: e.track.domain.name, domainSlug: e.track.domain.slug, enrollments: [] });
     }
-    domainMap.get(key)!.enrollments.push({ ...e, status: effectiveStatus });
+    domainMap.get(key)!.enrollments.push(e);
   }
 
   const certificates = student.enrollments

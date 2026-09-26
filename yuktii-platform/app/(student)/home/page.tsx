@@ -38,13 +38,8 @@ export default async function StudentHomePage() {
     }),
   ]);
 
-  const disablePayment = process.env.DISABLE_PAYMENT_GATEWAY !== 'false';
-  const enrollments = rawEnrollments.map((e) => {
-    if (disablePayment && e.status === 'PENDING_PAYMENT') {
-      return { ...e, status: 'IN_PROGRESS', paymentStatus: 'PAID' };
-    }
-    return e;
-  });
+  const enrollments = rawEnrollments;
+
 
   const activeEnrollment = enrollments.find((e) => e.status === 'IN_PROGRESS');
   const completedCount = enrollments.filter((e) => e.status === 'COMPLETED').length;

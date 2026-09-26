@@ -72,28 +72,11 @@ export default async function TrackDetailPage({
     .filter((e) => ['completed', 'needs_review'].includes(e.status) && e.finalScore !== null && e.finalScore >= 0)
     .map((e) => ({ stageId: e.stageId, finalScore: e.finalScore }));
 
-  let enrollment = rawEnrollment;
+  const enrollment = rawEnrollment;
   if (!enrollment || enrollment.studentId !== session.studentId) return notFound();
 
-  // Auto-upgrade pending payment to active when payment gateway is disabled for testing
-  if (enrollment.status === 'PENDING_PAYMENT' && process.env.DISABLE_PAYMENT_GATEWAY !== 'false') {
-    enrollment = await prisma.enrollment.update({
-      where: { id: params.id },
-      data: { status: 'IN_PROGRESS', paymentStatus: 'PAID' },
-      include: {
-        track: {
-          include: {
-            domain: true,
-            stages: { orderBy: { stageNumber: 'asc' } },
-          },
-        },
-        submissions: true,
-        certificate: true,
-      },
-    });
-  }
-
   const stages = enrollment.track.stages;
+
 
   if (stages.length === 0) {
     return (

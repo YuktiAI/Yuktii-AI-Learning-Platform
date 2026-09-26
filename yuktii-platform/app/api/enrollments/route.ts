@@ -117,11 +117,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ enrollmentId: existing.id, alreadyEnrolled: true });
     }
 
-    // ── PAYMENT GATEWAY DISABLING FOR TESTING ──────────────────────────────
-    // Automatically mark all new/existing enrollments as PAID & IN_PROGRESS so the complete system can be tested.
-    // Set DISABLE_PAYMENT_GATEWAY=false in .env.local to re-enable Razorpay payment gateway.
-    const disablePayment = process.env.DISABLE_PAYMENT_GATEWAY !== 'false';
-
+    // All tracks are free — create enrollment immediately as active
     const enrollment = existing
       ? await prisma.enrollment.update({
           where: { id: existing.id },
@@ -132,66 +128,32 @@ export async function POST(req: NextRequest) {
           data: {
             studentId: session.studentId,
             trackId: track.id,
-            paymentStatus: disablePayment ? 'PAID' : 'PENDING',
-            status: disablePayment ? 'IN_PROGRESS' : 'PENDING_PAYMENT',
+            paymentStatus: 'PAID',
+            status: 'IN_PROGRESS',
           },
           include: { track: { include: { domain: true, stages: { orderBy: { stageNumber: 'asc' } } } } },
         });
 
-    if (disablePayment) {
-      // Compute and store the stage unlock schedule for this enrollment.
-      // Uses the 0.4× formula from Section 10.
-      const stageCount = enrollment.track.stages.length;
-      const trackDays = enrollment.track.duration;
-      if (stageCount > 0 && !enrollment.stageUnlockSchedule) {
-        const schedule = computeStageUnlockSchedule(trackDays, stageCount, enrollment.enrolledAt);
-        await prisma.enrollment.update({
-          where: { id: enrollment.id },
-          data: { stageUnlockSchedule: schedule },
-        });
-        console.log(`[enrollments] Stage unlock schedule set for ${enrollment.id}: ${schedule}`);
-      }
-
-      // Trigger master project generation — waitUntil keeps the Vercel function
-      // alive after the response is sent so the generation completes.
-      waitUntil(triggerMasterProjectGeneration(enrollment));
-      return NextResponse.json({
-        enrollmentId: enrollment.id,
-        bypassedPayment: true,
-        message: 'Enrolled directly with payment gateway disabled for system testing.',
+    // Compute and store the stage unlock schedule for this enrollment.
+    // Uses the 0.4× formula from Section 10.
+    const stageCount = enrollment.track.stages.length;
+    const trackDays = enrollment.track.duration;
+    if (stageCount > 0 && !enrollment.stageUnlockSchedule) {
+      const schedule = computeStageUnlockSchedule(trackDays, stageCount, enrollment.enrolledAt);
+      await prisma.enrollment.update({
+        where: { id: enrollment.id },
+        data: { stageUnlockSchedule: schedule },
       });
+      console.log(`[enrollments] Stage unlock schedule set for ${enrollment.id}: ${schedule}`);
     }
 
-    // ── PRODUCTION: create Razorpay order if payment gateway enabled ─────────
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-      return NextResponse.json({ error: 'Payment gateway configuration missing' }, { status: 500 });
-    }
-
-    const Razorpay = (await import('razorpay')).default;
-    const razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET,
-    });
-
-    const order = await (razorpay.orders as any).create({
-      amount: track.price,
-      currency: 'INR',
-      receipt: enrollment.id,
-    });
-
-    await prisma.enrollment.update({
-      where: { id: enrollment.id },
-      data: { razorpayOrderId: order.id },
-    });
-
-    return NextResponse.json({
-      enrollmentId: enrollment.id,
-      order,
-      razorpayKeyId: process.env.RAZORPAY_KEY_ID,
-    });
+    // Trigger master project generation — waitUntil keeps the Vercel function
+    // alive after the response is sent so the generation completes.
+    waitUntil(triggerMasterProjectGeneration(enrollment));
+    return NextResponse.json({ enrollmentId: enrollment.id });
   } catch (err) {
     const { studentMessage } = await logError({
-      service: 'enrollment-razorpay',
+      service: 'enrollment',
       error: err,
       context: { studentId: session.studentId },
     });

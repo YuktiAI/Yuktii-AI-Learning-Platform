@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Lock, ChevronRight, Award, AlertTriangle, RefreshCw,
-  ExternalLink, Cpu, Monitor, Home, Zap
+  ExternalLink, Cpu, Monitor, Home
 } from 'lucide-react';
 import SubmissionForm from './SubmissionForm';
 
@@ -195,7 +195,7 @@ export default function TrackDetailClient({
             selfCheckCompleted: true,
             aiEvalPassed: true,
             aiEvalScore: 100,
-            contentUrl: 'https://github.com/testing/test-mode-submission',
+            contentUrl: '',
           },
         ];
       });
@@ -232,7 +232,6 @@ export default function TrackDetailClient({
           <div className="glass rounded-xl border border-line p-4 sticky top-20">
             <div className="flex items-center justify-between mb-3">
               <p className="stage-id text-xs text-ink/40 tracking-widest">STAGES</p>
-              <span className="text-[10px] font-bold text-teal bg-teal/10 px-2 py-0.5 rounded">TEST MODE</span>
             </div>
             <ol className="space-y-1">
               {stages.map((s) => {
@@ -267,17 +266,6 @@ export default function TrackDetailClient({
               })}
             </ol>
 
-            <hr className="divider my-4" />
-
-            {/* Test mode notice */}
-            <div className="rounded-lg bg-teal/10 border border-teal/20 px-3 py-2.5 mb-3">
-              <p className="text-[10px] font-bold text-teal tracking-wide mb-0.5 flex items-center gap-1">
-                <Zap size={10} /> ALL STAGES UNLOCKED
-              </p>
-              <p className="text-xs text-ink/75 leading-tight">
-                Link submission is turned off for testing. Click any stage to open it instantly.
-              </p>
-            </div>
             <div className="text-xs text-ink/40 space-y-1.5">
               <div className="flex items-center gap-2"><CheckCircle2 size={11} className="text-teal" /> Completed</div>
               <div className="flex items-center gap-2"><ChevronRight size={11} className="text-ink/60" /> Current Stage</div>
@@ -293,9 +281,6 @@ export default function TrackDetailClient({
               <p className="stage-id text-xs text-teal tracking-widest mb-1">
                 {enrollment.track.domain.name} · Stage {currentStage?.stageNumber ?? '—'} of {stages.length}
               </p>
-              <span className="text-xs font-semibold text-teal bg-teal/10 px-2.5 py-1 rounded-full flex items-center gap-1">
-                <Zap size={11} /> Instant Navigation Active
-              </span>
             </div>
             <h1 className="font-display text-3xl font-semibold">
               {currentStage?.title || enrollment.track.certificateName}

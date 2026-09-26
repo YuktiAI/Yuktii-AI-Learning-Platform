@@ -20,7 +20,6 @@ import {
   AlertCircle,
   AlertTriangle,
   ChevronRight,
-  Zap,
 } from 'lucide-react';
 
 
@@ -133,7 +132,7 @@ export default function SubmissionForm({
   const isLast = stageNumber >= totalStages;
 
 
-  // ── Section 10: Compute unlock state (Test Mode: Always Unlocked) ──────────────────
+  // ── Section 10: Unlock state (stage unlock schedule) ──────────────────
   const [unlockCountdown, setUnlockCountdown] = useState<string | null>(null);
   const unlocksAt: Date | null = null;
   const isUnlocked = true;
@@ -173,31 +172,6 @@ export default function SubmissionForm({
   const [urlErr, setUrlErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitErr, setSubmitErr] = useState('');
-  const [instantCompleting, setInstantCompleting] = useState(false);
-
-  async function handleInstantComplete() {
-    setInstantCompleting(true);
-    try {
-      const res = await fetch('/api/submissions/instant-complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enrollmentId, stageId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setPhase('done');
-        if (onStageCompleted) {
-          onStageCompleted(stageNumber, data.submission);
-        } else {
-          router.refresh();
-        }
-      }
-    } catch (err: any) {
-      console.error('[instant-complete error]', err);
-    } finally {
-      setInstantCompleting(false);
-    }
-  }
 
   // ── Evaluation Pipeline State ──────────────────────────────────────────────
   const [repoUrl, setRepoUrl] = useState(
@@ -249,14 +223,15 @@ export default function SubmissionForm({
 
     let targetUrl = url.trim();
     if (!targetUrl) {
-      targetUrl = 'https://github.com/testing/test-mode-submission';
-      setUrl(targetUrl);
+      setUrlErr('Please enter a link to your work');
+      return;
     }
     try {
       new URL(targetUrl);
       setUrlErr('');
     } catch {
-      targetUrl = 'https://github.com/testing/test-mode-submission';
+      setUrlErr('Please enter a valid URL');
+      return;
     }
 
     setSubmitting(true);
@@ -424,38 +399,12 @@ export default function SubmissionForm({
             </div>
           )}
 
-          {/* Test Mode: 1-Click Complete Banner */}
-          <div className="rounded-xl border border-teal/40 bg-teal/5 p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal">
-                <Zap size={14} className="fill-teal" />
-                <span>Test Mode: Link Submission Turned Off</span>
-              </div>
-              <p className="text-xs text-ink/75 mt-1 leading-relaxed">
-                You can complete this stage and unlock the next stage instantly with one click, without submitting any link.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleInstantComplete}
-              disabled={instantCompleting}
-              className="btn-teal text-xs font-semibold px-4 py-2.5 shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
-            >
-              {instantCompleting ? (
-                <RefreshCw size={13} className="animate-spin" />
-              ) : (
-                <Zap size={13} />
-              )}
-              <span>{instantCompleting ? 'Completing…' : '⚡ Complete Stage Instantly →'}</span>
-            </button>
-          </div>
-
-          <h2 className="font-medium text-xs stage-id text-ink/40 tracking-widest mb-4">SUBMIT YOUR WORK (OPTIONAL)</h2>
+          <h2 className="font-medium text-xs stage-id text-ink/40 tracking-widest mb-4">SUBMIT YOUR WORK</h2>
 
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-1.5" htmlFor="submit-url">
-                Link to your work <span className="text-ink/40 font-normal">(optional in test mode)</span>
+                Link to your work
               </label>
               <input
                 id="submit-url"
@@ -538,32 +487,6 @@ export default function SubmissionForm({
             {url}
           </a>
         </div>
-      </div>
-
-      {/* Test Mode: 1-Click Complete Banner */}
-      <div className="rounded-xl border border-teal/40 bg-teal/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal">
-            <Zap size={14} className="fill-teal" />
-            <span>Test Mode: Link Submission Turned Off</span>
-          </div>
-          <p className="text-xs text-ink/75 mt-1 leading-relaxed">
-            You can bypass AI evaluation and pass this stage immediately with 100/100 score.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={handleInstantComplete}
-          disabled={instantCompleting}
-          className="btn-teal text-xs font-semibold px-4 py-2.5 shrink-0 flex items-center justify-center gap-1.5 shadow-sm"
-        >
-          {instantCompleting ? (
-            <RefreshCw size={13} className="animate-spin" />
-          ) : (
-            <Zap size={13} />
-          )}
-          <span>{instantCompleting ? 'Completing…' : '⚡ Complete Stage Instantly →'}</span>
-        </button>
       </div>
 
       {/* ── Multi-Agent Evaluation Panel ── */}

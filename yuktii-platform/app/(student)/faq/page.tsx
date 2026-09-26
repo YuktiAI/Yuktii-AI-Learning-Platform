@@ -33,8 +33,8 @@ const FAQS = [
     a: 'Every certificate is assigned a unique ID and QR code at the moment it\'s generated. The QR code links to a public page at yuktii.ai/verify/[id] that shows the student name, domain, certification level, and completion date — no login required. A recruiter can verify it directly from a resume or LinkedIn profile.',
   },
   {
-    q: 'What payment methods are accepted?',
-    a: 'We use Razorpay, which supports UPI, credit/debit cards, netbanking, and EMI options. Pricing is being finalized and will be shown at checkout before any payment is required.',
+    q: 'Is Yuktii AI Labs free to use?',
+    a: 'Yes. All tracks are currently free to enroll in. There is no payment required to start or complete any certification track.',
   },
   {
     q: 'I already completed similar work on another platform. Can I just take the certificate?',

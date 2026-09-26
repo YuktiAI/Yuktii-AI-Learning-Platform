@@ -42,14 +42,7 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  // When payment gateway is disabled for testing, auto-treat pending payment as in progress
-  const disablePayment = process.env.DISABLE_PAYMENT_GATEWAY !== 'false';
-  const enrollments = rawEnrollments.map((e) => {
-    if (disablePayment && e.status === 'PENDING_PAYMENT') {
-      return { ...e, status: 'IN_PROGRESS', paymentStatus: 'PAID' };
-    }
-    return e;
-  });
+  const enrollments = rawEnrollments;
 
   const completedCount = enrollments.filter((e) => e.status === 'COMPLETED').length;
   const inProgressCount = enrollments.filter((e) => e.status === 'IN_PROGRESS').length;
@@ -153,17 +146,13 @@ export default async function DashboardPage() {
 
                 {/* Actions */}
                 <div className="mt-5 flex flex-wrap gap-3">
-                  {e.status === 'PENDING_PAYMENT' ? (
-                    <span className="text-xs text-ink/50 italic">Payment required to begin</span>
-                  ) : (
-                    <Link
+                  <Link
                       href={`/dashboard/track/${e.id}`}
                       prefetch={true}
                       className={`${isComplete ? 'btn-ghost' : 'btn-primary'} text-sm`}
                     >
                       {isComplete ? 'View track' : completedStages === 0 ? 'Start track →' : 'Continue track →'}
                     </Link>
-                  )}
                   {e.certificate && (
                     <Link
                       href={`/verify/${e.certificate.publicCertificateId}`}
