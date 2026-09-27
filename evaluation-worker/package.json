@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch --env-file=.env src/worker.ts",
     "build": "npx prisma generate && tsc --noEmit",
-    "start": "tsx --env-file=.env src/worker.ts",
+    "start": "tsx src/worker.ts",
     "postinstall": "npx prisma generate",
     "test": "tsx src/__tests__/run-tests.ts"
   },
