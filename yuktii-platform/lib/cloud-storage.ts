@@ -1,4 +1,4 @@
-﻿/**
+/**
  * lib/cloud-storage.ts — Certificate PDF storage via AWS S3.
  *
  * Required env vars in .env.local:
@@ -48,17 +48,21 @@ export async function uploadCertificatePdf(
 
   const key = `certificates/${publicCertificateId}.pdf`;
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket:      bucket,
-      Key:         key,
-      Body:        buffer,
-      ContentType: "application/pdf",
-      // Public-read: URL is permanently accessible without signing.
-      ACL:         "public-read",
-    }),
-  );
+  try {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket:      bucket,
+        Key:         key,
+        Body:        buffer,
+        ContentType: "application/pdf",
+      }),
+    );
 
-  const region = process.env.S3_REGION!;
-  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+    const region = process.env.S3_REGION!;
+    return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+  } catch (err: any) {
+    console.warn(`[cloud-storage] S3 upload failed (${err?.message}) — falling back to base64 data URI in DB`);
+    const base64 = buffer.toString("base64");
+    return `data:application/pdf;base64,${base64}`;
+  }
 }
