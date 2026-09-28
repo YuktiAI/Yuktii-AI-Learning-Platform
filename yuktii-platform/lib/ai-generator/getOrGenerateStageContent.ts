@@ -21,7 +21,10 @@ export interface StageContentForDisplay {
   id: string;
   enrollmentId: string;
   stageNumber: number;
+  title?: string;
   problemStatement: string;
+  nonTechnicalExplanation?: string;
+  technicalExplanation?: string;
   requirements: string[];
   acceptanceCriteria: string[];
   estimatedEffort: string;
@@ -38,19 +41,22 @@ export async function getOrGenerateStageContent(params: {
   domainName: string;
   levelName: string;
   learningObjectives: string;
+  force?: boolean;
 }): Promise<StageContentForDisplay> {
-  const { enrollmentId, stageNumber, totalStages, domainSlug, domainName, levelName, learningObjectives } = params;
+  const { enrollmentId, stageNumber, totalStages, domainSlug, domainName, levelName, learningObjectives, force } = params;
 
   // ── Step 1: Check for existing row ────────────────────────────────────────
-  const existing = await prisma.stageGeneratedContent.findUnique({
-    where: { enrollmentId_stageNumber: { enrollmentId, stageNumber } },
-  });
+  if (!force) {
+    const existing = await prisma.stageGeneratedContent.findUnique({
+      where: { enrollmentId_stageNumber: { enrollmentId, stageNumber } },
+    });
 
-  if (existing) {
-    // Serve from DB — NEVER call Groq again
-    const resourceLinkIds: string[] = safeParseJson(existing.resourceLinkIds, []);
-    const matchedResources = await resolveResourceLinkIds(resourceLinkIds);
-    return toDisplayModel(existing, matchedResources);
+    if (existing && existing.generationStatus === 'SUCCESS' && existing.problemStatement && existing.problemStatement.trim().length > 0) {
+      // Serve from DB — NEVER call LLM again unless forced
+      const resourceLinkIds: string[] = safeParseJson(existing.resourceLinkIds, []);
+      const matchedResources = await resolveResourceLinkIds(resourceLinkIds);
+      return toDisplayModel(existing, matchedResources);
+    }
   }
 
   // ── Step 2: Verify master project is locked ───────────────────────────────
@@ -83,9 +89,9 @@ export async function getOrGenerateStageContent(params: {
   let structuredResult;
   try {
     const { generateStructuredStageContent } = await import('./structured-generation');
-    // Allow up to 35 seconds for LLM generation (Pass 1 + Pass 2 critique)
+    // Allow up to 55 seconds for LLM generation (Pass 1 + Pass 2 critique across providers)
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Stage generation exceeded 35s timeout across providers')), 35000)
+      setTimeout(() => reject(new Error('Stage generation exceeded 55s timeout across providers')), 55000)
     );
 
     structuredResult = await Promise.race([
@@ -122,7 +128,7 @@ export async function getOrGenerateStageContent(params: {
 
     throw new AiGenerationError(
       'stage_content',
-      `Failed to generate custom stage scenario: ${errMsg}. Please try again.`
+      `Failed to generate custom stage scenario: ${errMsg}. Please click the generate button to try again.`
     );
   }
 
@@ -132,9 +138,31 @@ export async function getOrGenerateStageContent(params: {
   const matchedResources = await matchResources(generated.resourceTags, domainSlug);
   const resourceLinkIds = matchedResources.map(r => r.id);
 
-  // ── Step 5: Store permanently in DB with full structured contract ────────
-  const row = await prisma.stageGeneratedContent.create({
-    data: {
+  // ── Step 5: Store permanently in DB with full structured contract (safe upsert) ────────
+  const row = await prisma.stageGeneratedContent.upsert({
+    where: { enrollmentId_stageNumber: { enrollmentId, stageNumber } },
+    update: {
+      title:                   generated.title,
+      problemStatement:        generated.problemStatement,
+      learningObjectives:      JSON.stringify(generated.learningObjectives),
+      starterFiles:            JSON.stringify(generated.starterFiles),
+      hiddenTestCases:         JSON.stringify(generated.hiddenTestCases),
+      difficultyTier:          generated.difficultyTier,
+      nonTechnicalExplanation: generated.nonTechnicalExplanation,
+      technicalExplanation:    generated.technicalExplanation,
+      expectedFileStructure:   JSON.stringify(generated.expectedFileStructure),
+      passFailCriteria:        JSON.stringify(generated.passFailCriteria),
+      critiquePassResult:      JSON.stringify(structuredResult.critique),
+      generationVersion:       structuredResult.version,
+      generationModel:         structuredResult.modelUsed,
+      requirements:            JSON.stringify(generated.requirements),
+      resourceTags:            JSON.stringify(generated.resourceTags),
+      resourceLinkIds:         JSON.stringify(resourceLinkIds),
+      acceptanceCriteria:      JSON.stringify(generated.acceptanceCriteria),
+      estimatedEffort:         generated.estimatedEffort,
+      generationStatus:        'SUCCESS',
+    },
+    create: {
       enrollmentId,
       stageNumber,
       title:                   generated.title,
@@ -195,7 +223,10 @@ function toDisplayModel(
     id: string;
     enrollmentId: string;
     stageNumber: number;
+    title?: string | null;
     problemStatement: string;
+    nonTechnicalExplanation?: string | null;
+    technicalExplanation?: string | null;
     requirements: string;
     acceptanceCriteria: string;
     estimatedEffort: string;
@@ -205,15 +236,18 @@ function toDisplayModel(
   matchedResources: MatchedResource[],
 ): StageContentForDisplay {
   return {
-    id:                row.id,
-    enrollmentId:      row.enrollmentId,
-    stageNumber:       row.stageNumber,
-    problemStatement:  row.problemStatement,
-    requirements:      safeParseJson(row.requirements, []),
-    acceptanceCriteria: safeParseJson(row.acceptanceCriteria, []),
-    estimatedEffort:   row.estimatedEffort,
-    generationStatus:  row.generationStatus,
+    id:                      row.id,
+    enrollmentId:            row.enrollmentId,
+    stageNumber:             row.stageNumber,
+    title:                   row.title || `Stage ${row.stageNumber}`,
+    problemStatement:        row.problemStatement,
+    nonTechnicalExplanation: row.nonTechnicalExplanation || '',
+    technicalExplanation:    row.technicalExplanation || '',
+    requirements:            safeParseJson(row.requirements, []),
+    acceptanceCriteria:      safeParseJson(row.acceptanceCriteria, []),
+    estimatedEffort:         row.estimatedEffort || '2-3 hours',
+    generationStatus:        row.generationStatus,
     matchedResources,
-    generatedAt:       row.generatedAt,
+    generatedAt:             row.generatedAt,
   };
 }

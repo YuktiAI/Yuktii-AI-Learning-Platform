@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Lock, ChevronRight, Award, AlertTriangle, RefreshCw,
-  ExternalLink, Cpu, Monitor, Home
+  ExternalLink, Cpu, Monitor, Home, Sparkles
 } from 'lucide-react';
 import SubmissionForm from './SubmissionForm';
 
@@ -72,11 +72,12 @@ export default function TrackDetailClient({
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  const fetchStageContent = React.useCallback(async (stageNum: number) => {
+  const fetchStageContent = React.useCallback(async (stageNum: number, force: boolean = false) => {
     setIsGenerating(true);
     setGenerationError(null);
     try {
-      const res = await fetch(`/api/enrollments/stage-content?enrollmentId=${enrollment.id}&stageNumber=${stageNum}`);
+      const url = `/api/enrollments/stage-content?enrollmentId=${enrollment.id}&stageNumber=${stageNum}${force ? '&force=true' : ''}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (res.ok && data.ok && data.content) {
         setStageContents((prev) => ({
@@ -101,7 +102,7 @@ export default function TrackDetailClient({
       !existing.problemStatement ||
       existing.problemStatement.includes('Your personalised project scenario will appear here')
     ) {
-      fetchStageContent(activeStageNumber);
+      fetchStageContent(activeStageNumber, false);
     }
   }, [activeStageNumber, fetchStageContent]);
 
@@ -162,7 +163,7 @@ export default function TrackDetailClient({
 
   // Currently resolved stage content (real AI-generated only)
   const rawContent = currentStage ? stageContents[currentStage.stageNumber] : null;
-  const stageContent = (rawContent && rawContent.problemStatement && !rawContent.problemStatement.includes('Your personalised project scenario will appear here'))
+  const stageContent = (rawContent && rawContent.generationStatus !== 'FAILED' && rawContent.problemStatement && rawContent.problemStatement.trim().length > 0 && !rawContent.problemStatement.includes('Your personalised project scenario will appear here'))
     ? rawContent
     : null;
 
@@ -360,43 +361,115 @@ export default function TrackDetailClient({
               )}
 
               {/* Project task & specifications */}
-              <div className="rounded-xl border border-marigold/30 bg-marigold/5 p-6 mb-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-medium text-xs stage-id text-marigold-dark tracking-widest">STAGE TASK SPECIFICATION</h2>
-                  {stageContent && (
-                    <span className="text-[10px] stage-id text-marigold-dark/70 bg-marigold/10 border border-marigold/20 rounded px-2 py-0.5 font-medium">
-                      {stageContent.estimatedEffort || '2-3 hours'}
-                    </span>
-                  )}
+              <div className="rounded-xl border border-marigold/30 bg-marigold/5 p-6 mb-5 transition-all">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-marigold/20">
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-medium text-xs stage-id text-marigold-dark tracking-widest uppercase">
+                      STAGE TASK SPECIFICATION
+                    </h2>
+                    {stageContent && (
+                      <span className="text-[10px] stage-id text-marigold-dark/80 bg-marigold/15 border border-marigold/30 rounded px-2 py-0.5 font-semibold">
+                        {stageContent.estimatedEffort || '2-3 hours'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Manual trigger / regenerate button for every stage */}
+                  <button
+                    type="button"
+                    disabled={isGenerating}
+                    onClick={() => fetchStageContent(activeStageNumber, true)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition ${
+                      isGenerating
+                        ? 'bg-amber-100 text-amber-700 border border-amber-300 opacity-80 cursor-wait'
+                        : stageContent
+                        ? 'bg-white hover:bg-amber-50 text-marigold-dark border border-marigold/40 hover:border-marigold active:scale-[0.98]'
+                        : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-amber-500/20 active:scale-[0.98]'
+                    }`}
+                    title={
+                      stageContent
+                        ? 'Click to regenerate a fresh custom AI scenario for this stage'
+                        : 'Click to generate your custom AI project scenario for this stage'
+                    }
+                  >
+                    {isGenerating ? (
+                      <>
+                        <RefreshCw size={12} className="animate-spin text-amber-700" />
+                        <span>Generating Scenario…</span>
+                      </>
+                    ) : stageContent ? (
+                      <>
+                        <RefreshCw size={12} className="text-marigold-dark" />
+                        <span>Regenerate Scenario</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={12} />
+                        <span>Generate Stage Scenario</span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {isGenerating && (
-                  <div className="py-10 px-6 text-center">
-                    <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                    <p className="text-sm font-semibold text-ink">Personalising Your Stage Assignment</p>
-                    <p className="text-xs text-ink/65 mt-1 max-w-md mx-auto">
-                      Our AI curriculum engine is synthesizing a concrete, industry-aligned scenario for this milestone. This takes just a few seconds…
+                  <div className="py-12 px-6 text-center">
+                    <div className="relative w-12 h-12 mx-auto mb-4">
+                      <div className="w-12 h-12 border-3 border-amber-200 border-t-amber-600 rounded-full animate-spin" />
+                      <div className="absolute inset-0 flex items-center justify-center text-amber-600">
+                        <Sparkles size={18} className="animate-pulse" />
+                      </div>
+                    </div>
+                    <p className="text-sm font-semibold text-ink">Personalising Stage {activeStageNumber} Scenario</p>
+                    <p className="text-xs text-ink/65 mt-1.5 max-w-md mx-auto leading-relaxed">
+                      Our multi-provider AI curriculum engine is architecting a concrete, industry-aligned project milestone with requirements and acceptance criteria.
                     </p>
                   </div>
                 )}
 
                 {generationError && !isGenerating && (
-                  <div className="py-6 px-4 text-center">
+                  <div className="py-6 px-4 text-center bg-rose-50/80 rounded-lg border border-rose-200">
                     <AlertTriangle className="text-rose-500 mx-auto mb-2" size={24} />
                     <p className="text-sm font-semibold text-rose-900">Custom scenario generation unavailable</p>
-                    <p className="text-xs text-rose-700 mt-1 mb-3">{generationError}</p>
+                    <p className="text-xs text-rose-700 mt-1 mb-4 max-w-md mx-auto">{generationError}</p>
                     <button
                       type="button"
-                      onClick={() => fetchStageContent(activeStageNumber)}
-                      className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition"
+                      onClick={() => fetchStageContent(activeStageNumber, true)}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm transition active:scale-[0.98]"
                     >
                       <RefreshCw size={12} /> Retry Generation
                     </button>
                   </div>
                 )}
 
+                {!stageContent && !isGenerating && !generationError && (
+                  <div className="py-10 px-6 text-center bg-white/60 rounded-xl border border-dashed border-marigold/50">
+                    <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
+                      <Sparkles size={22} />
+                    </div>
+                    <p className="text-sm font-semibold text-ink">Project Scenario Not Generated Yet</p>
+                    <p className="text-xs text-ink/70 mt-1 mb-4 max-w-md mx-auto leading-relaxed">
+                      Your personalized, industry-grade project milestone for Stage {activeStageNumber} hasn&apos;t been synthesized yet. Press the button below to generate it now.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => fetchStageContent(activeStageNumber, true)}
+                      className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 shadow-sm transition active:scale-[0.98]"
+                    >
+                      <Sparkles size={14} /> Generate Stage Specification
+                    </button>
+                  </div>
+                )}
+
                 {stageContent && !isGenerating && (
                   <div className="space-y-5">
+                    {/* Plain language / Non-technical overview */}
+                    {stageContent.nonTechnicalExplanation && (
+                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3.5 text-xs text-amber-950 leading-relaxed">
+                        <span className="font-semibold block mb-1 text-amber-900 uppercase tracking-wider text-[11px]">Milestone Overview</span>
+                        {stageContent.nonTechnicalExplanation}
+                      </div>
+                    )}
+
                     {/* Problem statement */}
                     <div>
                       <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Problem Statement</p>

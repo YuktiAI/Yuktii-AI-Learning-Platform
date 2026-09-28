@@ -6,23 +6,28 @@ import { generateMasterProject } from '@/lib/ai-generator/generateMasterProject'
 import { getOrGenerateStageContent } from '@/lib/ai-generator/getOrGenerateStageContent';
 import { logError } from '@/lib/error-handler';
 
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 const schema = z.object({
   enrollmentId: z.string().min(1),
   stageNumber: z.number().int().min(1),
+  force: z.boolean().optional(),
 });
 
 /**
  * GET or POST /api/enrollments/stage-content
  *
  * Fetches or asynchronously generates on demand the personalized AI stage content.
- * Never returns a mock or static placeholder template as the assignment.
+ * Supports force=true to explicitly trigger or re-trigger generation on any stage.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const enrollmentId = searchParams.get('enrollmentId') || '';
   const stageNumber = parseInt(searchParams.get('stageNumber') || '1', 10);
+  const force = searchParams.get('force') === 'true' || searchParams.get('retry') === 'true';
 
-  return handleStageContent(enrollmentId, stageNumber);
+  return handleStageContent(enrollmentId, stageNumber, force);
 }
 
 export async function POST(req: NextRequest) {
@@ -32,13 +37,14 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
-    return handleStageContent(parsed.data.enrollmentId, parsed.data.stageNumber);
+    const force = Boolean(parsed.data.force || (body as any).retry);
+    return handleStageContent(parsed.data.enrollmentId, parsed.data.stageNumber, force);
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }
 
-async function handleStageContent(enrollmentId: string, stageNumber: number) {
+async function handleStageContent(enrollmentId: string, stageNumber: number, force: boolean = false) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -65,32 +71,36 @@ async function handleStageContent(enrollmentId: string, stageNumber: number) {
     return NextResponse.json({ error: 'Stage not found' }, { status: 404 });
   }
 
-  // 1. Check if already generated and SUCCESS
-  const existing = await prisma.stageGeneratedContent.findUnique({
-    where: {
-      enrollmentId_stageNumber: {
-        enrollmentId,
-        stageNumber,
-      },
-    },
-  });
-
-  if (existing && existing.generationStatus === 'SUCCESS') {
-    return NextResponse.json({
-      ok: true,
-      status: 'ready',
-      content: {
-        id: existing.id,
-        enrollmentId: existing.enrollmentId,
-        stageNumber: existing.stageNumber,
-        title: existing.title,
-        problemStatement: existing.problemStatement,
-        requirements: safeParse(existing.requirements, []),
-        acceptanceCriteria: safeParse(existing.acceptanceCriteria, []),
-        estimatedEffort: existing.estimatedEffort || '2-3 hours',
-        generationStatus: existing.generationStatus,
+  // 1. Check if already generated and SUCCESS (unless user forced regeneration)
+  if (!force) {
+    const existing = await prisma.stageGeneratedContent.findUnique({
+      where: {
+        enrollmentId_stageNumber: {
+          enrollmentId,
+          stageNumber,
+        },
       },
     });
+
+    if (existing && existing.generationStatus === 'SUCCESS' && existing.problemStatement && existing.problemStatement.trim().length > 0) {
+      return NextResponse.json({
+        ok: true,
+        status: 'ready',
+        content: {
+          id: existing.id,
+          enrollmentId: existing.enrollmentId,
+          stageNumber: existing.stageNumber,
+          title: existing.title || `Stage ${existing.stageNumber}`,
+          problemStatement: existing.problemStatement,
+          nonTechnicalExplanation: existing.nonTechnicalExplanation || '',
+          technicalExplanation: existing.technicalExplanation || '',
+          requirements: safeParse(existing.requirements, []),
+          acceptanceCriteria: safeParse(existing.acceptanceCriteria, []),
+          estimatedEffort: existing.estimatedEffort || '2-3 hours',
+          generationStatus: existing.generationStatus,
+        },
+      });
+    }
   }
 
   // 2. If master project is not yet locked, lock it first
@@ -123,7 +133,7 @@ async function handleStageContent(enrollmentId: string, stageNumber: number) {
 
   // 3. Generate stage content
   try {
-    console.log(`[stage-content] Generating custom scenario for stage ${stageNumber} (enrollment ${enrollmentId})...`);
+    console.log(`[stage-content] Generating custom scenario for stage ${stageNumber} (enrollment ${enrollmentId}, force=${force})...`);
     const generated = await getOrGenerateStageContent({
       enrollmentId,
       stageNumber,
@@ -132,6 +142,7 @@ async function handleStageContent(enrollmentId: string, stageNumber: number) {
       domainName: enrollment.track.domain.name,
       levelName: enrollment.track.levelName,
       learningObjectives: stage.learningObjectives || '',
+      force,
     });
 
     return NextResponse.json({
@@ -141,7 +152,10 @@ async function handleStageContent(enrollmentId: string, stageNumber: number) {
         id: generated.id,
         enrollmentId: generated.enrollmentId,
         stageNumber: generated.stageNumber,
+        title: generated.title || `Stage ${generated.stageNumber}`,
         problemStatement: generated.problemStatement,
+        nonTechnicalExplanation: generated.nonTechnicalExplanation || '',
+        technicalExplanation: generated.technicalExplanation || '',
         requirements: generated.requirements,
         acceptanceCriteria: generated.acceptanceCriteria,
         estimatedEffort: generated.estimatedEffort,
