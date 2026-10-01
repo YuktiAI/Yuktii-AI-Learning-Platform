@@ -26,7 +26,7 @@ export async function POST(_req: NextRequest) {
 
   // Load all active enrollments with their stages and evaluations
   const enrollments = await prisma.enrollment.findMany({
-    where: { status: { in: ['active', 'completed'] } },
+    where: { status: { in: ['IN_PROGRESS', 'SUBMITTED', 'COMPLETED', 'active', 'completed'] } },
     include: {
       track: {
         include: {
