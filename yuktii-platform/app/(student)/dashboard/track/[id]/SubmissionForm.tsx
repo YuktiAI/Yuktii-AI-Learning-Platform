@@ -134,11 +134,29 @@ export default function SubmissionForm({
 
   // ── Section 10: Unlock state (stage unlock schedule) ──────────────────
   const [unlockCountdown, setUnlockCountdown] = useState<string | null>(null);
-  const unlocksAt: Date | null = null;
-  const isUnlocked = true;
+
+  // Compute unlocksAt from the schedule JSON prop
+  const unlocksAt: Date | null = (() => {
+    if (!stageUnlockSchedule) return null;
+    try {
+      const schedule = JSON.parse(stageUnlockSchedule) as Record<string, string>;
+      const iso = schedule[String(stageNumber)];
+      if (!iso) return null;
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  })();
+  // A stage is unlocked if either: no gate exists, the gate has passed,
+  // OR the stage is already completed (resubmission is always open).
+  const isUnlocked = !unlocksAt || new Date() >= unlocksAt || isComplete;
 
   useEffect(() => {
-    if (!unlocksAt || isUnlocked) return;
+    if (!unlocksAt || isUnlocked) {
+      setUnlockCountdown(null);
+      return;
+    }
     function update() {
       const now = Date.now();
       const diff = unlocksAt!.getTime() - now;
@@ -154,13 +172,19 @@ export default function SubmissionForm({
       else setUnlockCountdown(`${m}m`);
     }
     update();
-    const t = setInterval(update, 60_000);
+    const t = setInterval(update, 30_000);
     return () => clearInterval(t);
   }, [unlocksAt, isUnlocked]);
 
   // ── Form & Submission Phase State ──────────────────────────────────────────
+  // If the stage is passed (isComplete) but NOT in the done phase yet because
+  // the student hit "View full breakdown", keep them in evaluate phase.
+  // Phase progression: submit → evaluate → done.
+  // For passed stages we keep them in 'evaluate' so they can resubmit.
   const [phase, setPhase] = useState<'submit' | 'evaluate' | 'done'>(
-    isComplete
+    isComplete && existingEvaluation
+      ? 'evaluate'
+      : isComplete
       ? 'done'
       : existingSubmission
       ? 'evaluate'
@@ -383,6 +407,21 @@ export default function SubmissionForm({
   if (phase === 'submit') {
     return (
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Time-gate banner: stage locked until a future date */}
+        {!isUnlocked && unlocksAt && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 flex items-start gap-3">
+            <Clock size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-900">
+                Submission opens in {unlockCountdown || 'soon'}
+              </p>
+              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                Read the scenario carefully and plan your solution. Submissions open on{' '}
+                <strong>{unlocksAt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</strong>.
+              </p>
+            </div>
+          </div>
+        )}
         <div className="rounded-xl border border-line bg-white p-6">
           {domainSlug === 'iot' && (
             <div className="rounded-xl border border-teal/30 bg-teal/5 p-5 mb-6 space-y-3">
@@ -443,10 +482,11 @@ export default function SubmissionForm({
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !isUnlocked}
             className="btn-primary mt-5 disabled:opacity-50"
+            title={!isUnlocked ? `Submission opens in ${unlockCountdown ?? 'soon'}` : undefined}
           >
-            {submitting ? 'Saving…' : 'Save & proceed to evaluation →'}
+            {submitting ? 'Saving…' : !isUnlocked ? `Locked — opens in ${unlockCountdown ?? 'soon'}` : 'Save & proceed to evaluation →'}
           </button>
         </div>
       </form>
@@ -855,15 +895,19 @@ export default function SubmissionForm({
                 </div>
               )}
 
-              {/* Resubmit button if failed */}
-              {finalScore < 50 && (
-                <button
-                  onClick={() => setFullEval(null)}
-                  className="w-full px-4 py-2.5 border border-violet-300 text-violet-800 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors"
-                >
-                  Resubmit after fixing issues →
-                </button>
-              )}
+              {/* Resubmit / Improve score button — always shown after eval, locked or not */}
+              <button
+                onClick={() => setPhase('submit')}
+                disabled={!isUnlocked}
+                className="w-full px-4 py-2.5 border border-violet-300 text-violet-800 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={!isUnlocked ? `Next submission unlocks in ${unlockCountdown ?? 'soon'}` : undefined}
+              >
+                {finalScore !== null && finalScore >= 50
+                  ? isUnlocked
+                    ? 'Improve your score — resubmit with new commits →'
+                    : `Score improvement locked — opens in ${unlockCountdown ?? 'soon'}`
+                  : 'Fix issues and resubmit →'}
+              </button>
             </div>
           )}
         </div>
