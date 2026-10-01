@@ -101,20 +101,70 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
     } as any,
   });
 
-  // ── Update Submission record ───────────────────────────────────────────────
+  // ── Update Submission record — NEVER revoke a prior pass ─────────────────
+  // Read existing record to check prior pass status and best score
+  const existingSubmission = await prisma.submission.findFirst({
+    where: { enrollmentId, stageId },
+    select: { aiEvalPassed: true, selfCheckCompleted: true, aiEvalScore: true },
+  });
+
+  // A student who previously passed must not be demoted by a lower resubmission score.
+  // We preserve the best (highest) historical score and never flip aiEvalPassed back to false.
+  const previouslyPassed = existingSubmission?.aiEvalPassed === true || existingSubmission?.selfCheckCompleted === true;
+  const previousBestScore = existingSubmission?.aiEvalScore ?? 0;
+  const preservedBestScore = Math.max(previousBestScore, finalScore);
+
+  // Only set pass flags if the student passes NOW *or* previously passed
+  const finalPassedFlag = effectivePassed || previouslyPassed;
+  const finalSelfCheckFlag = effectivePassed || (previouslyPassed && !needsReview);
+
   await prisma.submission.updateMany({
     where: { enrollmentId, stageId },
     data: {
-      aiEvalScore:          finalScore,
+      aiEvalScore:          preservedBestScore,
       aiEvalFeedback:       ctx.mentorReport?.reasoning ?? '',
-      aiEvalPassed:         effectivePassed,
+      aiEvalPassed:         finalPassedFlag,
       aiEvalAt:             new Date(),
-      // selfCheckCompleted gates stage unlock — only set when truly passed
-      selfCheckCompleted:   effectivePassed,
+      // selfCheckCompleted gates stage unlock — set when truly passed (never reset)
+      selfCheckCompleted:   finalSelfCheckFlag,
       // evaluationReleasedAt controls when the student sees the report
       evaluationReleasedAt: new Date(),
     },
   });
+
+  // ── Upsert StageProgress when stage is newly passed (Workstream B unlock) ─
+  // This ensures the next stage's submissionOpensAt is set from this passedAt date.
+  if (effectivePassed) {
+    try {
+      const stage = await prisma.stage.findUnique({
+        where: { id: stageId },
+        select: { stageNumber: true, trackId: true },
+      });
+      if (stage) {
+        const now = new Date();
+        await prisma.stageProgress.upsert({
+          where: { enrollmentId_stageId: { enrollmentId, stageId } },
+          update: {
+            status:    'PASSED',
+            passedAt:  now,
+            bestScore: preservedBestScore,
+          },
+          create: {
+            enrollmentId,
+            stageId,
+            userId:    job.studentId,
+            status:    'PASSED',
+            passedAt:  now,
+            bestScore: preservedBestScore,
+          },
+        });
+        logger.info('StageProgress upserted — stage passed', { evaluationId, stageId, stageNumber });
+      }
+    } catch (spErr) {
+      // Non-fatal: log but don't fail the pipeline
+      logger.warn('Failed to upsert StageProgress', { evaluationId, error: String(spErr) });
+    }
+  }
 
   // ── Certificate trigger ────────────────────────────────────────────────────
   // Only triggered when capstone stage is passed AND human review is not pending.
