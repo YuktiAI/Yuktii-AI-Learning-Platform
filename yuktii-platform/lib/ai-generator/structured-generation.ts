@@ -12,6 +12,7 @@ import Groq from 'groq-sdk';
 import { MODEL_CANDIDATES } from './getModel';
 import { AiGenerationError } from './AiGenerationError';
 import type { MasterProject } from './generateMasterProject';
+import { SPEC_VERSION, type ProjectSpecification } from './project-spec-schema';
 
 export interface TestCaseSpec {
   name: string;
@@ -56,6 +57,44 @@ export interface TwoPassGenerationResult {
   critique: CritiqueResult;
   modelUsed: string;
   version: string;
+}
+
+/** Convert the generation contract into the stable v2 evaluator contract. */
+export function toProjectSpecification(content: StructuredStageContent, context: {
+  domainName: string; domainSlug: string; levelName: string; stageNumber: number; totalStages: number;
+}): ProjectSpecification {
+  const requirements = content.requirements.map((text, index) => ({
+    id: `FR-${String(index + 1).padStart(2, '0')}`,
+    text,
+    required: true,
+    verify: { method: 'llm_judge' as const, target: `Implementation evidence for FR-${String(index + 1).padStart(2, '0')}` },
+  }));
+  const foundation = content.difficultyTier === 'foundation';
+  return {
+    specVersion: SPEC_VERSION,
+    problemStatement: { title: content.title, domain: context.domainName, difficulty: content.difficultyTier, targetUsers: 'the assigned project users', realWorldContext: content.problemStatement, expectedOutcome: content.technicalExplanation || content.problemStatement },
+    problemDescription: { background: content.problemStatement, industrySignificance: content.nonTechnicalExplanation, existingLimitations: '', proposedSolution: content.technicalExplanation },
+    learningObjectives: content.learningObjectives,
+    prerequisites: content.resourceTags,
+    resourcesAndDatasets: [],
+    technologyStack: { frontend: [], backend: [], database: [], libraries: content.resourceTags },
+    systemArchitecture: content.technicalExplanation,
+    functionalRequirements: requirements,
+    nonFunctionalRequirements: foundation ? [] : ['Validate inputs and handle failures safely.'],
+    developmentRoadmap: [content.nonTechnicalExplanation, ...content.acceptanceCriteria],
+    gitDevelopmentPlan: content.expectedFileStructure.map((artifact, index) => ({ milestone: `Milestone ${index + 1}`, expectedArtifacts: [artifact] })),
+    componentsToDevelop: content.expectedFileStructure,
+    deliverables: content.passFailCriteria.mustPass,
+    testCases: content.acceptanceCriteria.map((expected, index) => ({ name: `Published check ${index + 1}`, expected })),
+    hiddenTestCases: content.hiddenTestCases.map(test => ({ name: test.name, expected: test.expectedOutput || 'Command succeeds', hidden: true })),
+    edgeCases: foundation ? [] : ['Empty or invalid input', 'Network or dependency failure'],
+    securityRequirements: foundation ? [] : ['Do not commit secrets; validate untrusted input.'],
+    documentationRequirements: ['README with setup, usage, and verification steps.'],
+    deploymentRequirements: foundation ? [] : ['Document local or container deployment.'],
+    evaluationRubric: [{ category: 'Functional requirements', weight: 60 }, { category: 'Code quality', weight: 20 }, { category: 'Documentation', weight: 20 }],
+    extensionChallenges: { basic: [], intermediate: [], advanced: [], bonus: [] },
+    finalSubmissionChecklist: [...content.passFailCriteria.mustPass, 'Push all source code and documentation to GitHub.'],
+  };
 }
 
 import { generateWithFallback } from './llm-provider';

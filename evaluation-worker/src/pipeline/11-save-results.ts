@@ -158,6 +158,25 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
             bestScore: preservedBestScore,
           },
         });
+        const nextStage = await prisma.stage.findFirst({
+          where: { trackId: stage.trackId, stageNumber: stage.stageNumber + 1 },
+          select: { id: true, gapDaysOverride: true },
+        });
+        if (nextStage) {
+          const track = await prisma.track.findUnique({
+            where: { id: stage.trackId },
+            select: { duration: true, _count: { select: { stages: true } } },
+          });
+          if (track) {
+            const gapDays = nextStage.gapDaysOverride ?? Math.round(track.duration / Math.max(track._count.stages, 1));
+            const opensAt = new Date(now.getTime() + Math.max(0, gapDays) * 86_400_000);
+            await prisma.stageProgress.upsert({
+              where: { enrollmentId_stageId: { enrollmentId, stageId: nextStage.id } },
+              update: {}, // an improved resubmission must never extend this window
+              create: { enrollmentId, stageId: nextStage.id, userId: job.studentId, status: opensAt <= now ? 'OPEN' : 'SCENARIO_OPEN', scenarioUnlockedAt: now, submissionOpensAt: opensAt },
+            });
+          }
+        }
         logger.info('StageProgress upserted — stage passed', { evaluationId, stageId, stageNumber });
       }
     } catch (spErr) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionSync } from '@/lib/auth';
+import { getStageAccess, SUBMISSION_RATE_LIMIT_MINUTES } from '@/lib/stage-access';
 
 const schema = z.object({
   enrollmentId: z.string().min(1),
@@ -34,63 +35,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    // ── Server-side stage progression gate ───────────────────────────────────
-    const stage = await prisma.stage.findUnique({
-      where: { id: stageId },
-      select: { stageNumber: true, trackId: true },
+    // ── Server-side stage access & pacing gate ──────────────────────────────
+    const access = await getStageAccess(enrollmentId, stageId, session.studentId);
+    if (!access.canSubmit) {
+      if (access.state === 'SCENARIO_OPEN_SUBMISSION_LOCKED') {
+        return NextResponse.json(
+          {
+            error: access.reason || 'Stage submissions are locked by pacing rules.',
+            code: 'STAGE_NOT_OPEN',
+            opensAt: access.submissionOpensAt,
+          },
+          { status: 403 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error: access.reason || 'Submission not allowed for this stage.',
+          code: access.state,
+        },
+        { status: 403 }
+      );
+    }
+
+    // ── Rate limit check (e.g. 10 minutes between submissions per stage) ────
+    const lastSub = await prisma.submissionRecord.findFirst({
+      where: { enrollmentId, stageId },
+      orderBy: { submittedAt: 'desc' },
+      select: { submittedAt: true },
     });
-    if (!stage) return NextResponse.json({ error: 'Stage not found' }, { status: 404 });
-
-    if (stage.stageNumber > 1) {
-      // Find the previous stage record
-      const prevStage = await prisma.stage.findUnique({
-        where: { trackId_stageNumber: { trackId: stage.trackId, stageNumber: stage.stageNumber - 1 } },
-        select: { id: true },
-      });
-      if (prevStage) {
-        const prevSubmission = enrollment.submissions.find((s) => s.stageId === prevStage.id);
-        if (!prevSubmission?.selfCheckCompleted) {
-          return NextResponse.json(
-            { error: `Complete Stage ${stage.stageNumber - 1} before submitting Stage ${stage.stageNumber}.` },
-            { status: 403 }
-          );
-        }
+    if (lastSub) {
+      const elapsedMs = Date.now() - new Date(lastSub.submittedAt).getTime();
+      const cooldownMs = SUBMISSION_RATE_LIMIT_MINUTES * 60 * 1000;
+      if (elapsedMs < cooldownMs) {
+        const minsLeft = Math.ceil((cooldownMs - elapsedMs) / 60000);
+        return NextResponse.json(
+          {
+            error: `Please wait ${minsLeft} minute${minsLeft > 1 ? 's' : ''} before submitting again.`,
+            code: 'RATE_LIMITED',
+          },
+          { status: 429 }
+        );
       }
     }
 
-    // ── Section 10: Stage unlock timeline gate (0.4x multiplier) ─────────────
-    if (enrollment.stageUnlockSchedule) {
-      try {
-        const schedule = JSON.parse(enrollment.stageUnlockSchedule) as Record<string, string>;
-        const unlockIso = schedule[String(stage.stageNumber)];
-        if (unlockIso) {
-          const unlockAt = new Date(unlockIso);
-          const now = new Date();
-          if (now < unlockAt) {
-            const msLeft = unlockAt.getTime() - now.getTime();
-            const hoursLeft = Math.ceil(msLeft / (1000 * 60 * 60));
-            const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-            const label = hoursLeft > 48 ? `${daysLeft} days` : `${hoursLeft} hours`;
-            return NextResponse.json(
-              {
-                error: `Stage ${stage.stageNumber} is locked by pacing rules. It unlocks in approximately ${label}.`,
-                unlocksAt: unlockAt.toISOString(),
-                gateLocked: true,
-              },
-              { status: 403 }
-            );
-          }
-        }
-      } catch {
-        // fail open if parse fails
-      }
-    }
-    // ── End gate ─────────────────────────────────────────────────────────────
+    // ── Save or update submission, preserving pass status ───────────────────
+    const existing = await prisma.submission.findUnique({
+      where: { enrollmentId_stageId: { enrollmentId, stageId } },
+      select: { selfCheckCompleted: true, aiEvalPassed: true, aiEvalScore: true },
+    });
 
     const submission = await prisma.submission.upsert({
       where: { enrollmentId_stageId: { enrollmentId, stageId } },
-      update: { contentUrl, contentNote },
-      create: { enrollmentId, stageId, contentUrl, contentNote },
+      update: {
+        contentUrl,
+        contentNote,
+        // Never revoke a pass or completed status on resubmit
+        selfCheckCompleted: existing?.selfCheckCompleted || false,
+        aiEvalPassed: existing?.aiEvalPassed || false,
+      },
+      create: {
+        enrollmentId,
+        stageId,
+        contentUrl,
+        contentNote,
+      },
     });
 
     return NextResponse.json({ submission });

@@ -17,6 +17,7 @@ import { getSessionSync } from '@/lib/auth';
 import { enqueueEvaluation } from '@/lib/evaluation-queue';
 import { runInlineEvaluation } from '@/lib/inline-evaluator';
 import { logError, STUDENT_SAFE_ERROR } from '@/lib/error-handler';
+import { getStageAccess, SUBMISSION_RATE_LIMIT_MINUTES } from '@/lib/stage-access';
 
 const schema = z.object({
   enrollmentId: z.string().min(1),
@@ -36,6 +37,16 @@ function normalizeRepoUrl(url: string): string {
     .replace(/\.git$/, '')
     .replace(/\/$/, '')
     .trim();
+}
+
+async function getGitHubHeadSha(repoUrl: string): Promise<string | null> {
+  const match = repoUrl.match(/github\.com[/:]([^/]+)\/([^/#]+?)(?:\.git)?\/?$/i);
+  if (!match) return null;
+  const response = await fetch(`https://api.github.com/repos/${match[1]}/${match[2]}/commits/HEAD`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'yuktii-evaluator' }, cache: 'no-store',
+  });
+  if (!response.ok) return null;
+  return ((await response.json()) as { sha?: string }).sha || null;
 }
 
 export async function POST(req: NextRequest) {
@@ -85,33 +96,13 @@ export async function POST(req: NextRequest) {
   // Formula: minHours = (trackDays / stageCount) × 0.4 × 24
   // Unlock timestamps are pre-computed and stored as JSON on Enrollment.stageUnlockSchedule.
   // For resubmissions (existing completed evaluation), this gate is bypassed.
-  const hasExistingCompletion = await prisma.evaluation.findFirst({
-    where: { enrollmentId, stageId, status: 'completed' },
-    select: { id: true },
-  });
-
-  if (!hasExistingCompletion && enrollment.stageUnlockSchedule) {
-    try {
-      const schedule = JSON.parse(enrollment.stageUnlockSchedule) as Record<string, string>;
-      const unlockIso = schedule[String(stage.stageNumber)];
-      if (unlockIso) {
-        const unlockAt = new Date(unlockIso);
-        const now = new Date();
-        if (now < unlockAt) {
-          const msLeft = unlockAt.getTime() - now.getTime();
-          const hoursLeft = Math.ceil(msLeft / (1000 * 60 * 60));
-          const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-          const label = hoursLeft > 48 ? `${daysLeft} day${daysLeft !== 1 ? 's' : ''}` : `${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''}`;
-          return NextResponse.json({
-            error: `Stage ${stage.stageNumber} is not yet unlocked. You can submit in approximately ${label}.`,
-            unlocksAt: unlockAt.toISOString(),
-          }, { status: 403 });
-        }
-      }
-    } catch {
-      // If the schedule JSON is malformed, allow the submission (fail open).
-      console.warn('[submit] Failed to parse stageUnlockSchedule for enrollment', enrollmentId);
-    }
+  const access = await getStageAccess(enrollmentId, stageId, session.studentId);
+  if (!access.canSubmit) {
+    return NextResponse.json({ error: access.reason || 'Submission is not available for this stage.', code: access.state === 'SCENARIO_OPEN_SUBMISSION_LOCKED' ? 'STAGE_NOT_OPEN' : access.state, opensAt: access.submissionOpensAt }, { status: 403 });
+  }
+  const latestRecord = await prisma.submissionRecord.findFirst({ where: { enrollmentId, stageId }, orderBy: { submittedAt: 'desc' }, select: { submittedAt: true } });
+  if (latestRecord && Date.now() - latestRecord.submittedAt.getTime() < SUBMISSION_RATE_LIMIT_MINUTES * 60_000) {
+    return NextResponse.json({ error: 'Please wait a few minutes before submitting another evaluation.', code: 'RATE_LIMITED' }, { status: 429 });
   }
   // ── End timeline gate ─────────────────────────────────────────────────────
 
@@ -136,22 +127,23 @@ export async function POST(req: NextRequest) {
   // this stage (completed), return the existing result immediately.
   // A new evaluation is only created when the URL is different (new repo or commit).
   const normalizedRepoUrl = normalizeRepoUrl(repoUrl);
-  const existingCompletedEval = await prisma.evaluation.findFirst({
+  const headSha = await getGitHubHeadSha(repoUrl);
+  const existingCompletedEval = headSha ? await prisma.evaluation.findFirst({
     where: {
       enrollmentId,
       stageId,
       status: 'completed',
-      submissionRecord: { normalizedRepoUrl },
+      submissionRecord: { normalizedRepoUrl, commitSha: headSha },
     },
     orderBy: { completedAt: 'desc' },
     select: { id: true, status: true, finalScore: true },
-  });
+  }) : null;
   if (existingCompletedEval) {
     return NextResponse.json({
       evaluationId: existingCompletedEval.id,
       status:       'completed',
       finalScore:   existingCompletedEval.finalScore,
-      message:      'This repository was already evaluated for this stage. Submit a new commit or different repository URL to re-evaluate.',
+      message:      'No new GitHub commit was found. Pushing new commits is required to improve your score.',
       cached:       true,
     });
   }
@@ -194,6 +186,7 @@ export async function POST(req: NextRequest) {
         stageId,
         submittedUrl:     repoUrl,
         normalizedRepoUrl,
+        commitSha:        headSha,
         // repositoryId and commitSha will be set by the worker (stage 1)
       },
     });

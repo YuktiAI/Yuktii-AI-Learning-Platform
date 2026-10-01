@@ -16,6 +16,7 @@ import { AiGenerationError } from './AiGenerationError';
 import { generateStageContentFromGroq, getStageRole } from './generateStageContent';
 import { matchResources, type MatchedResource } from './matchResources';
 import type { MasterProject } from './generateMasterProject';
+import { hashProjectSpecification } from './project-spec-schema';
 
 export interface StageContentForDisplay {
   id: string;
@@ -133,6 +134,9 @@ export async function getOrGenerateStageContent(params: {
   }
 
   const generated = structuredResult.content;
+  const { toProjectSpecification } = await import('./structured-generation');
+  const projectSpec = toProjectSpecification(generated, { domainName, domainSlug, levelName, stageNumber, totalStages });
+  const specHash = hashProjectSpecification(projectSpec);
 
   // ── Step 4: Match resources by tags ──────────────────────────────────────
   const matchedResources = await matchResources(generated.resourceTags, domainSlug);
@@ -155,6 +159,9 @@ export async function getOrGenerateStageContent(params: {
       critiquePassResult:      JSON.stringify(structuredResult.critique),
       generationVersion:       structuredResult.version,
       generationModel:         structuredResult.modelUsed,
+      specVersion:              projectSpec.specVersion,
+      specHash,
+      projectSpec:              JSON.stringify(projectSpec),
       requirements:            JSON.stringify(generated.requirements),
       resourceTags:            JSON.stringify(generated.resourceTags),
       resourceLinkIds:         JSON.stringify(resourceLinkIds),
@@ -178,6 +185,9 @@ export async function getOrGenerateStageContent(params: {
       critiquePassResult:      JSON.stringify(structuredResult.critique),
       generationVersion:       structuredResult.version,
       generationModel:         structuredResult.modelUsed,
+      specVersion:              projectSpec.specVersion,
+      specHash,
+      projectSpec:              JSON.stringify(projectSpec),
       requirements:            JSON.stringify(generated.requirements),
       resourceTags:            JSON.stringify(generated.resourceTags),
       resourceLinkIds:         JSON.stringify(resourceLinkIds),

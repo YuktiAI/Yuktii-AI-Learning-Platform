@@ -72,10 +72,12 @@ model Stage {
   generationVersion  String   @default("v1.0")
   generationModel    String   @default("llama-3.3-70b-versatile")
   generationSchema   String?  // JSON: pinned schema spec used for generation
+  gapDaysOverride    Int?     // Optional admin override in days for stage time-gate
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  submissions Submission[]
+  submissions   Submission[]
+  stageProgress StageProgress[]
 
   @@unique([trackId, stageNumber])
 }
@@ -150,6 +152,7 @@ model Enrollment {
   submissionRecords SubmissionRecord[]
   evaluations       Evaluation[]
   emailLogs         EmailLog[]
+  stageProgresses   StageProgress[]
 
   @@unique([studentId, trackId])
 }
@@ -210,10 +213,15 @@ model StageGeneratedContent {
   critiquePassResult      String   @default("{}")  // JSON: critique output from two-pass generation
   generationVersion       String   @default("v1.0")
   generationModel         String   @default("")
+  // Workstream D: spec versioning & tamper-proofing
+  specVersion             String   @default("v1.0") // "v1.0" | "v2.0"
+  specHash                String?  // SHA-256 hex of canonical spec JSON (set on generation)
+  projectSpec             String?  // Versioned machine-readable ProjectSpecification JSON
   generatedAt        DateTime   @default(now())
 
   @@unique([enrollmentId, stageNumber])
 }
+
 
 model Certificate {
   id                  String     @id @default(cuid())
@@ -492,4 +500,31 @@ model ErrorLog {
   @@index([severity, resolvedAt])
   @@index([studentId])
   @@index([enrollmentId])
+}
+
+// ─────────────────────────────────────────────
+// Stage progress and time-gating tracking
+// ─────────────────────────────────────────────
+
+model StageProgress {
+  id                 String     @id @default(cuid())
+  enrollmentId       String
+  enrollment         Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stageId            String
+  stage              Stage      @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  userId             String     // Student.id
+  status             String     @default("LOCKED") // LOCKED | SCENARIO_OPEN | OPEN | PASSED
+  scenarioUnlockedAt DateTime?
+  submissionOpensAt  DateTime?
+  passedAt           DateTime?
+  bestScore          Int?
+  implementationPath String?    // "hardware" | "simulation"
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@unique([enrollmentId, stageId])
+  @@unique([userId, stageId])
+  @@index([enrollmentId])
+  @@index([stageId])
+  @@index([userId])
 }
