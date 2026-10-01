@@ -302,9 +302,17 @@ createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', queue: EVALUATION_QUEUE_NAME, ts: new Date().toISOString() }));
+  } else if (req.url === '/' || req.url === '') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      service: 'yuktii-evaluation-worker',
+      status: 'running',
+      healthCheck: '/health',
+      note: 'This service is the background evaluation worker. Access the web platform at your Next.js frontend deployment URL.'
+    }));
   } else {
-    res.writeHead(404);
-    res.end();
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
   }
 }).listen(PORT, () => {
   logger.info(`Health-check server listening on port ${PORT}`);
