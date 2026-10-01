@@ -7,6 +7,26 @@ import type { PipelineContext, GitHistoryResult } from '../pipeline-context.js';
 
 type Commit = { date: string; message: string };
 
+// Detect commit density spikes: group commits by calendar day and
+// check whether one day contains an outsized fraction of all commits.
+function detectBulkUpload(
+  commits: Commit[],
+  durationDays: number,
+): { suspectBulkUpload: boolean; commitDensitySpike: boolean } {
+  if (commits.length === 0) return { suspectBulkUpload: false, commitDensitySpike: false };
+
+  // Group by YYYY-MM-DD
+  const dayCounts: Record<string, number> = {};
+  for (const c of commits) {
+    const day = c.date.slice(0, 10); // ISO date prefix
+    if (day && day.length === 10) dayCounts[day] = (dayCounts[day] ?? 0) + 1;
+  }
+  const maxDayCount = Math.max(...Object.values(dayCounts));
+  const suspectBulkUpload = maxDayCount / commits.length > 0.4 && commits.length >= 3;
+  const commitDensitySpike = durationDays === 0 && commits.length > 5;
+  return { suspectBulkUpload, commitDensitySpike };
+}
+
 export async function analyzeGitHistory(ctx: PipelineContext): Promise<void> {
   const { evaluationId, sandboxId, sandboxRepoPath } = ctx;
   if (!sandboxId || !sandboxRepoPath) {
@@ -58,6 +78,8 @@ export async function analyzeGitHistory(ctx: PipelineContext): Promise<void> {
       .filter((count) => !isNaN(count));
     const largeCommitWarning = fileChangeCounts.some((count) => count > 50);
 
+    const { suspectBulkUpload, commitDensitySpike } = detectBulkUpload(commits, durationDays);
+
     const result: GitHistoryResult = {
       commitCount: commits.length,
       firstCommit: firstCommitTs ? new Date(firstCommitTs).toISOString() : null,
@@ -66,7 +88,9 @@ export async function analyzeGitHistory(ctx: PipelineContext): Promise<void> {
       avgCommitsPerDay: Math.round(avgCommitsPerDay * 100) / 100,
       commitMessages,
       largeCommitWarning,
-      summary: buildProcessSummary({ commitCount: commits.length, durationDays, avgCommitsPerDay, commitMessages, largeCommitWarning }),
+      suspectBulkUpload,
+      commitDensitySpike,
+      summary: buildProcessSummary({ commitCount: commits.length, durationDays, avgCommitsPerDay, commitMessages, largeCommitWarning, suspectBulkUpload, commitDensitySpike }),
     };
 
     ctx.gitHistoryResult = result;
@@ -94,9 +118,17 @@ function buildProcessSummary(data: {
   avgCommitsPerDay: number;
   commitMessages: string[];
   largeCommitWarning: boolean;
+  suspectBulkUpload: boolean;
+  commitDensitySpike: boolean;
 }): string {
   const parts: string[] = [];
-  if (data.durationDays === 0) {
+  if (data.commitDensitySpike) {
+    parts.push(
+      `All ${data.commitCount} commits appear to have been pushed in a single session. This pattern suggests code was ` +
+      `developed elsewhere and uploaded at once, rather than committed incrementally during development. ` +
+      `Iterative, frequent commits significantly improve your dev process score.`,
+    );
+  } else if (data.durationDays === 0) {
     parts.push(`The project has ${data.commitCount} commit(s) all on the same day, indicating it was submitted without iterative development.`);
   } else if (data.commitCount <= 3) {
     parts.push(`The project has only ${data.commitCount} commit(s) over ${data.durationDays} day(s). This shows limited version control usage - more frequent, smaller commits typically demonstrate iterative development.`);
@@ -105,6 +137,12 @@ function buildProcessSummary(data: {
     parts.push(data.avgCommitsPerDay >= 1
       ? 'This shows consistent, iterative development activity.'
       : 'The commit frequency is relatively low, suggesting work was done in larger batches.');
+  }
+
+  if (data.suspectBulkUpload && !data.commitDensitySpike) {
+    parts.push(
+      'More than 40% of commits were made on a single day. This bulk-commit pattern may indicate code was developed outside version control and added at once.',
+    );
   }
 
   const descriptiveMessages = data.commitMessages.filter((message) => message.split(' ').length >= 3 && message.length > 10);
@@ -128,6 +166,8 @@ function buildEmptyResult(reason: string): GitHistoryResult {
     avgCommitsPerDay: 0,
     commitMessages: [],
     largeCommitWarning: false,
+    suspectBulkUpload: false,
+    commitDensitySpike: false,
     summary: reason,
   };
 }

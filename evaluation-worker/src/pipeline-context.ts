@@ -57,14 +57,16 @@ export interface SweAgentFinding {
 }
 
 export interface GitHistoryResult {
-  commitCount:       number;
-  firstCommit:       string | null;  // ISO date string
-  lastCommit:        string | null;
-  durationDays:      number;
-  avgCommitsPerDay:  number;
-  commitMessages:    string[];
-  largeCommitWarning: boolean;  // true if any commit touches >50 files
-  summary:           string;    // plain-language development process summary
+  commitCount:         number;
+  firstCommit:         string | null;  // ISO date string
+  lastCommit:          string | null;
+  durationDays:        number;
+  avgCommitsPerDay:    number;
+  commitMessages:      string[];
+  largeCommitWarning:  boolean;        // true if any commit touches >50 files
+  suspectBulkUpload:   boolean;        // true if >40% of commits land on a single day
+  commitDensitySpike:  boolean;        // true if all commits in 0 days AND commitCount > 5
+  summary:             string;         // plain-language development process summary
 }
 
 export type RequirementStatus = 'PASS' | 'PARTIAL' | 'FAIL';

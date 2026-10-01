@@ -187,8 +187,16 @@ function computeDevProcessScore(ctx: PipelineContext): number {
   if (g.durationDays >= 3) score += 15;
   else if (g.durationDays >= 1) score += 5;
 
-  // Large commit warning
-  if (g.largeCommitWarning) score -= 15;
+  // ── Git hardening: bulk-upload / squash-bomb detection ──────────────────────
+  // commitDensitySpike: all commits on same day + >5 commits = squash-bomb pattern
+  if (g.commitDensitySpike) {
+    score -= 30;
+  } else if (g.suspectBulkUpload) {
+    // >40% of commits on one day = suspect bulk dump
+    score -= 20;
+  }
+  // Large single commit warning (independent of density spike)
+  if (g.largeCommitWarning) score -= 10;
 
   // Commit message quality (proxy: avg message length)
   const avgMsgLength = g.commitMessages.length > 0
