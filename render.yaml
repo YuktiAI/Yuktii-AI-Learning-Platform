@@ -1,16 +1,5 @@
 services:
   - type: web
-    name: yuktii-platform
-    runtime: node
-    rootDir: yuktii-platform
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npm start
-    plan: free
-    envVars:
-      - key: NODE_ENV
-        value: production
-
-  - type: web
     name: yuktii-eval-worker
     runtime: node
     rootDir: evaluation-worker
@@ -23,4 +12,5 @@ services:
         value: production
       - key: EVALUATION_PASS_SCORE
         value: "50"
+
 
