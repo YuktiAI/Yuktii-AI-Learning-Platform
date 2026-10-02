@@ -20,7 +20,9 @@ import {
   AlertCircle,
   AlertTriangle,
   ChevronRight,
+  Lock,
 } from 'lucide-react';
+import type { StageAccess } from '@/lib/stage-access';
 
 
 // ── Full evaluation pipeline types ───────────────────────────────────────────
@@ -108,6 +110,7 @@ type Props = {
   existingEvaluation?: FullEvaluation | null;
   onSelectStage?: (stageNumber: number) => void;
   onStageCompleted?: (stageNumber: number, submission?: any) => void;
+  stageAccess?: StageAccess;
 };
 
 
@@ -127,16 +130,21 @@ export default function SubmissionForm({
   nextStageHref,
   onSelectStage,
   onStageCompleted,
+  stageAccess,
 }: Props) {
   const router = useRouter();
   const isLast = stageNumber >= totalStages;
 
 
-  // ── Section 10: Unlock state (stage unlock schedule) ──────────────────
+  // ── Stage Access & Unlock Pacing State ──────────────────
   const [unlockCountdown, setUnlockCountdown] = useState<string | null>(null);
 
-  // Compute unlocksAt from the schedule JSON prop
+  // Compute unlocksAt from stageAccess (authoritative) or schedule JSON fallback
   const unlocksAt: Date | null = (() => {
+    if (stageAccess?.submissionOpensAt) {
+      const d = new Date(stageAccess.submissionOpensAt);
+      if (!isNaN(d.getTime())) return d;
+    }
     if (!stageUnlockSchedule) return null;
     try {
       const schedule = JSON.parse(stageUnlockSchedule) as Record<string, string>;
@@ -148,12 +156,15 @@ export default function SubmissionForm({
       return null;
     }
   })();
-  // A stage is unlocked if either: no gate exists, the gate has passed,
-  // OR the stage is already completed (resubmission is always open).
-  const isUnlocked = !unlocksAt || new Date() >= unlocksAt || isComplete;
+
+  const isPassed = stageAccess ? stageAccess.isPassed : isComplete;
+  const canSubmit = stageAccess ? stageAccess.canSubmit : (!unlocksAt || new Date() >= unlocksAt || isPassed);
+  const isLockedPrereq = stageAccess?.state === 'LOCKED_PREREQUISITE';
+  const isLockedPacing = stageAccess ? stageAccess.state === 'SCENARIO_OPEN_SUBMISSION_LOCKED' : (!canSubmit && unlocksAt && new Date() < unlocksAt);
+  const isUnlocked = canSubmit || isPassed;
 
   useEffect(() => {
-    if (!unlocksAt || isUnlocked) {
+    if (!unlocksAt || !isLockedPacing) {
       setUnlockCountdown(null);
       return;
     }
@@ -307,6 +318,12 @@ export default function SubmissionForm({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.message || 'Failed to submit for evaluation');
 
+      if (data.cached) {
+        setEvalSubmitErr(data.message || 'No new GitHub commit was found. Pushing new commits is required to improve your score.');
+        setSubmittingEval(false);
+        return;
+      }
+
       const initialEval: FullEvaluation = {
         id: data.evaluationId,
         status: (data.status as 'queued' | 'running') || 'queued',
@@ -322,6 +339,46 @@ export default function SubmissionForm({
     } finally {
       setSubmittingEval(false);
     }
+  }
+
+  // ── Prerequisite locked state ───────────────────────────────────────────────
+  if (isLockedPrereq) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 flex items-start gap-3">
+        <Lock size={20} className="text-amber-600 shrink-0 mt-0.5" />
+        <div>
+          <h3 className="text-sm font-semibold text-amber-900">
+            Stage {stageNumber} Locked
+          </h3>
+          <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+            {stageAccess?.reason || `Complete Stage ${stageNumber - 1} before submitting Stage ${stageNumber}.`}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Pacing locked state (Scenario is open, submission locked until date) ─────
+  if (isLockedPacing) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 flex items-start gap-3">
+          <Clock size={20} className="text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-amber-900">
+              Stage {stageNumber} scenario is ready! Submissions open {unlockCountdown ? `in ${unlockCountdown}` : 'soon'}
+            </h3>
+            <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+              {stageAccess?.reason || `Submissions open on ${unlocksAt?.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}. Use these days to understand the scenario and build your solution.`}
+            </p>
+          </div>
+        </div>
+        <ModelAnswerSection
+          modelAnswer={fullEval?.modelAnswer || modelAnswer}
+          isDynamic={Boolean(fullEval?.modelAnswer)}
+        />
+      </div>
+    );
   }
 
   /* ── DONE STATE (Section 8) ───────────────────────────────────────────────── */
@@ -399,6 +456,47 @@ export default function SubmissionForm({
             </button>
           </div>
         )}
+
+        {/* Resubmit form directly accessible after passing */}
+        {canSubmit && (
+          <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-violet-900">Improve Your Score</h4>
+                <p className="text-xs text-violet-700/80 mt-0.5">
+                  Push new commits to your GitHub repository and resubmit anytime. Your pass and best score ({fullEval?.finalScore ?? '50+'}/100) are permanently preserved.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPhase('evaluate')}
+                className="text-xs text-teal font-medium hover:underline shrink-0 ml-4"
+              >
+                View full breakdown →
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="url"
+                value={repoUrl || url}
+                onChange={(e) => { setRepoUrl(e.target.value); setUrl(e.target.value); setEvalSubmitErr(''); }}
+                placeholder="https://github.com/username/repo"
+                className="input-field text-sm flex-1"
+              />
+              <button
+                type="button"
+                onClick={handleSubmitForEvaluation}
+                disabled={submittingEval}
+                className="btn-primary text-xs shrink-0"
+              >
+                {submittingEval ? 'Submitting…' : 'Resubmit with new commit →'}
+              </button>
+            </div>
+            {evalSubmitErr && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{evalSubmitErr}</p>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -407,17 +505,12 @@ export default function SubmissionForm({
   if (phase === 'submit') {
     return (
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Time-gate banner: stage locked until a future date */}
-        {!isUnlocked && unlocksAt && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 flex items-start gap-3">
-            <Clock size={18} className="text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-amber-900">
-                Submission opens in {unlockCountdown || 'soon'}
-              </p>
-              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                Read the scenario carefully and plan your solution. Submissions open on{' '}
-                <strong>{unlocksAt.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</strong>.
+        {isPassed && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+              <p className="text-xs font-medium text-emerald-800">
+                Stage already completed with score <strong>{fullEval?.finalScore ?? '50+'}/100</strong>. Resubmitting with new commits will update your score if improved, and will never lower or revoke your pass.
               </p>
             </div>
           </div>

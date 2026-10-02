@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getSessionSync } from '@/lib/auth';
 import { evaluateSubmission } from '@/lib/ai-evaluator';
 import { logError } from '@/lib/error-handler';
+import { getStageAccess } from '@/lib/stage-access';
 
 const schema = z.object({
   enrollmentId: z.string().min(1),
@@ -43,49 +44,27 @@ export async function POST(req: NextRequest) {
   const stage = await prisma.stage.findUnique({ where: { id: stageId } });
   if (!stage) return NextResponse.json({ error: 'Stage not found' }, { status: 404 });
 
-  // ── Server-side stage progression gate ───────────────────────────────────
-  if (stage.stageNumber > 1) {
-    const prevStage = await prisma.stage.findUnique({
-      where: { trackId_stageNumber: { trackId: stage.trackId, stageNumber: stage.stageNumber - 1 } },
-      select: { id: true },
-    });
-    if (prevStage) {
-      const prevSub = enrollment.submissions.find((s) => s.stageId === prevStage.id);
-      if (!prevSub?.selfCheckCompleted) {
-        return NextResponse.json(
-          { error: `Complete Stage ${stage.stageNumber - 1} before evaluating Stage ${stage.stageNumber}.` },
-          { status: 403 }
-        );
-      }
+  // ── Unified server-side stage access & pacing gate ──────────────────────
+  const access = await getStageAccess(enrollmentId, stageId, session.studentId);
+  if (!access.canSubmit) {
+    if (access.state === 'SCENARIO_OPEN_SUBMISSION_LOCKED') {
+      return NextResponse.json(
+        {
+          error: access.reason || `Stage ${stage.stageNumber} evaluation is locked by pacing rules.`,
+          code: 'STAGE_NOT_OPEN',
+          opensAt: access.submissionOpensAt,
+          gateLocked: true,
+        },
+        { status: 403 }
+      );
     }
-  }
-
-  // ── Section 10: Stage unlock timeline gate (0.4x multiplier) ─────────────
-  if (enrollment.stageUnlockSchedule) {
-    try {
-      const schedule = JSON.parse(enrollment.stageUnlockSchedule) as Record<string, string>;
-      const unlockIso = schedule[String(stage.stageNumber)];
-      if (unlockIso) {
-        const unlockAt = new Date(unlockIso);
-        const now = new Date();
-        if (now < unlockAt) {
-          const msLeft = unlockAt.getTime() - now.getTime();
-          const hoursLeft = Math.ceil(msLeft / (1000 * 60 * 60));
-          const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-          const label = hoursLeft > 48 ? `${daysLeft} days` : `${hoursLeft} hours`;
-          return NextResponse.json(
-            {
-              error: `Stage ${stage.stageNumber} evaluation is locked by pacing rules. Unlocks in approximately ${label}.`,
-              unlocksAt: unlockAt.toISOString(),
-              gateLocked: true,
-            },
-            { status: 403 }
-          );
-        }
-      }
-    } catch {
-      // fail open if parse fails
-    }
+    return NextResponse.json(
+      {
+        error: access.reason || 'Evaluation not allowed for this stage.',
+        code: access.state,
+      },
+      { status: 403 }
+    );
   }
   // ── End gate ─────────────────────────────────────────────────────────────
 

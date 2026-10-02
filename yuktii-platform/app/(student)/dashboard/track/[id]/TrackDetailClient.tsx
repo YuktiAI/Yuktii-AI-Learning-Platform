@@ -20,6 +20,8 @@ interface Stage {
   modelAnswer: string;
 }
 
+import type { StageAccess } from '@/lib/stage-access';
+
 interface TrackDetailClientProps {
   enrollment: {
     id: string;
@@ -48,6 +50,7 @@ interface TrackDetailClientProps {
   allEvaluations: any[];
   allStageContents: Record<number, any>;
   isTrackComplete: boolean;
+  stageAccessMap?: Record<string, StageAccess>;
 }
 
 export default function TrackDetailClient({
@@ -59,6 +62,7 @@ export default function TrackDetailClient({
   allEvaluations,
   allStageContents,
   isTrackComplete: initialIsTrackComplete,
+  stageAccessMap,
 }: TrackDetailClientProps) {
   const router = useRouter();
   const [activeStageNumber, setActiveStageNumber] = useState<number>(initialStageNumber);
@@ -116,16 +120,24 @@ export default function TrackDetailClient({
     }
   }
 
-  // Set of completed stage IDs
-  const completedStageIds = new Set([
-    ...submissions.filter((s) => s.selfCheckCompleted || s.aiEvalPassed !== null || s.aiEvalScore !== null || Boolean(s.contentUrl)).map((s) => s.stageId),
-    ...completedEvals.map((e) => e.stageId),
-  ]);
+  // Set of completed stage IDs derived from server StageAccess or evaluations score >= 50
+  const completedStageIds = new Set(
+    stages
+      .filter((s) => {
+        const access = stageAccessMap ? stageAccessMap[s.id] : null;
+        if (access) return access.isPassed;
+        const evalPass = completedEvals.some((e) => e.stageId === s.id && (e.finalScore ?? 0) >= 50);
+        const subPass = submissions.some((sub) => sub.stageId === s.id && sub.aiEvalPassed === true);
+        return evalPass || subPass;
+      })
+      .map((s) => s.id)
+  );
 
   // Current stage object
   const currentStage = stages.find((s) => s.stageNumber === activeStageNumber) || stages[0];
   const nextStage = stages.find((s) => s.stageNumber === activeStageNumber + 1) || null;
-  const currentStageComplete = currentStage ? completedStageIds.has(currentStage.id) : false;
+  const currentStageAccess = currentStage && stageAccessMap ? stageAccessMap[currentStage.id] : null;
+  const currentStageComplete = currentStageAccess ? currentStageAccess.isPassed : (currentStage ? completedStageIds.has(currentStage.id) : false);
 
   // Active submission for this stage
   const currentSubmission = currentStage
@@ -537,6 +549,7 @@ export default function TrackDetailClient({
                   : null}
                 onSelectStage={handleSelectStage}
                 onStageCompleted={(num) => handleStageCompleted(num)}
+                stageAccess={currentStageAccess ?? undefined}
               />
             </>
           )}

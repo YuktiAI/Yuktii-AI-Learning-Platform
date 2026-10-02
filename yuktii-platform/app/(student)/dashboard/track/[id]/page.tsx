@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import TrackDetailClient from './TrackDetailClient';
 import IotModeSelector from '@/components/IotModeSelector';
 import RoboticsModeSelector from '@/components/RoboticsModeSelector';
+import { getAllStagesAccess } from '@/lib/stage-access';
 
 // Note: in-memory track-cache removed (Phase 5.2) — cache is not safe on
 // multi-instance deployments (Render/Vercel). Data is fetched fresh per request.
@@ -69,11 +70,14 @@ export default async function TrackDetailPage({
   const allStageGeneratedContents = fetchedStageContents;
   const allEvaluations = fetchedEvaluations;
   const allCompletedEvals = (fetchedEvaluations || [])
-    .filter((e) => ['completed', 'needs_review'].includes(e.status) && e.finalScore !== null && e.finalScore >= 0)
+    .filter((e) => ['completed', 'needs_review'].includes(e.status) && e.finalScore !== null && e.finalScore >= 50)
     .map((e) => ({ stageId: e.stageId, finalScore: e.finalScore }));
 
   const enrollment = rawEnrollment;
   if (!enrollment || enrollment.studentId !== session.studentId) return notFound();
+
+  // Compute unified stage access state for all stages in this track
+  const stageAccessMap = await getAllStagesAccess(enrollment.id, session.studentId);
 
   const stages = enrollment.track.stages;
 
@@ -143,6 +147,7 @@ export default async function TrackDetailPage({
       allEvaluations={allEvaluations || []}
       allStageContents={stageContentsMap}
       isTrackComplete={isTrackComplete}
+      stageAccessMap={stageAccessMap}
     />
   );
 }

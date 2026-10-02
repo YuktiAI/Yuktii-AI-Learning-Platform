@@ -193,3 +193,157 @@ export async function getStageAccess(
     stageNumber,
   };
 }
+
+/**
+ * Computes access states for all stages in a track for a given enrollment.
+ * Reduces database lookups when rendering the track dashboard.
+ */
+export async function getAllStagesAccess(
+  enrollmentId: string,
+  studentId: string
+): Promise<Record<string, StageAccess>> {
+  const enrollment = await prisma.enrollment.findUnique({
+    where: { id: enrollmentId },
+    include: {
+      track: {
+        include: {
+          stages: { orderBy: { stageNumber: 'asc' } },
+        },
+      },
+      submissions: true,
+      evaluations: {
+        orderBy: { createdAt: 'desc' },
+      },
+      stageProgresses: true,
+    },
+  });
+
+  if (!enrollment || enrollment.studentId !== studentId) {
+    throw new Error('Enrollment not found or unauthorized');
+  }
+
+  const stages = enrollment.track.stages;
+  const accessMap: Record<string, StageAccess> = {};
+  const passedStages = new Set<string>();
+
+  // Pass 1: compute pass status & bestScore for each stage
+  for (const stage of stages) {
+    const stageEvals = enrollment.evaluations.filter((e) => e.stageId === stage.id);
+    const completedEvals = stageEvals.filter(
+      (e) => ['completed', 'needs_review'].includes(e.status) && e.finalScore !== null
+    );
+    const currentProgress = enrollment.stageProgresses.find((p) => p.stageId === stage.id);
+
+    const bestScore = completedEvals.length > 0
+      ? Math.max(...completedEvals.map((e) => e.finalScore ?? 0))
+      : currentProgress?.bestScore ?? null;
+
+    const isPassed =
+      (currentProgress?.status === 'PASSED') ||
+      (bestScore !== null && bestScore >= 50) ||
+      enrollment.submissions.some((s) => s.stageId === stage.id && s.aiEvalPassed === true);
+
+    if (isPassed) {
+      passedStages.add(stage.id);
+    }
+  }
+
+  // Pass 2: compute StageAccess for each stage
+  for (const stage of stages) {
+    const stageNumber = stage.stageNumber;
+    const stageEvals = enrollment.evaluations.filter((e) => e.stageId === stage.id);
+    const currentProgress = enrollment.stageProgresses.find((p) => p.stageId === stage.id);
+    const completedEvals = stageEvals.filter(
+      (e) => ['completed', 'needs_review'].includes(e.status) && e.finalScore !== null
+    );
+    const bestScore = completedEvals.length > 0
+      ? Math.max(...completedEvals.map((e) => e.finalScore ?? 0))
+      : currentProgress?.bestScore ?? null;
+    const isPassed = passedStages.has(stage.id);
+
+    // Prerequisite check
+    if (stageNumber > 1) {
+      const prevStage = stages.find((s) => s.stageNumber === stageNumber - 1);
+      if (!prevStage || !passedStages.has(prevStage.id)) {
+        accessMap[stage.id] = {
+          state: 'LOCKED_PREREQUISITE',
+          canSubmit: false,
+          reason: `Complete Stage ${stageNumber - 1} before submitting Stage ${stageNumber}.`,
+          isPassed: false,
+          bestScore: null,
+          stageNumber,
+        };
+        continue;
+      }
+    }
+
+    // In-flight check
+    const inFlightEval = stageEvals.find((e) => ['queued', 'running'].includes(e.status));
+    if (inFlightEval) {
+      accessMap[stage.id] = {
+        state: 'EVALUATING',
+        canSubmit: false,
+        reason: 'Your last submission is still being evaluated. Please wait for the evaluation report before resubmitting.',
+        isPassed,
+        bestScore,
+        stageNumber,
+      };
+      continue;
+    }
+
+    // Time-gate check
+    if (!isPassed && stageNumber > 1 && !isGateBypassed()) {
+      const now = new Date();
+      let opensAt: Date | null = null;
+      if (currentProgress?.submissionOpensAt) {
+        opensAt = new Date(currentProgress.submissionOpensAt);
+      } else {
+        const prevStage = stages.find((s) => s.stageNumber === stageNumber - 1);
+        const prevProgress = prevStage ? enrollment.stageProgresses.find((p) => p.stageId === prevStage.id) : null;
+        const prevEval = prevStage
+          ? enrollment.evaluations.find((e) => e.stageId === prevStage.id && ['completed', 'needs_review'].includes(e.status) && (e.finalScore ?? 0) >= 50)
+          : null;
+        const passedAt = prevProgress?.passedAt || prevEval?.completedAt || enrollment.enrolledAt;
+        const gapDays = getStageGapDays(
+          stageNumber,
+          enrollment.track.duration,
+          stages.length,
+          stage.gapDaysOverride
+        );
+        opensAt = calculateSubmissionOpensAt(new Date(passedAt), gapDays);
+      }
+
+      if (opensAt && now < opensAt) {
+        const msLeft = opensAt.getTime() - now.getTime();
+        const hoursLeft = Math.ceil(msLeft / (1000 * 60 * 60));
+        const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+        const timeRemaining = hoursLeft > 48 ? `${daysLeft} days` : `${hoursLeft} hours`;
+
+        accessMap[stage.id] = {
+          state: 'SCENARIO_OPEN_SUBMISSION_LOCKED',
+          canSubmit: false,
+          submissionOpensAt: opensAt.toISOString(),
+          reason: `Great work on Stage ${stageNumber - 1}! Stage ${stageNumber} scenario is ready to read now. You can submit your work in approximately ${timeRemaining}. Use these days to understand the scenario and build it well.`,
+          isPassed: false,
+          bestScore: null,
+          stageNumber,
+        };
+        continue;
+      }
+    }
+
+    // Open for submission / resubmission
+    accessMap[stage.id] = {
+      state: 'OPEN',
+      canSubmit: true,
+      reason: isPassed
+        ? 'Stage completed! You can resubmit with new commits at any time to improve your score. Your existing pass and best score are permanently preserved.'
+        : undefined,
+      isPassed,
+      bestScore,
+      stageNumber,
+    };
+  }
+
+  return accessMap;
+}
