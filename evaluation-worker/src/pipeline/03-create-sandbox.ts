@@ -14,7 +14,8 @@ export async function createSandbox(ctx: PipelineContext): Promise<void> {
 
   logger.info('Creating evaluation sandbox', { evaluationId, stage: 'createSandbox' });
 
-  const sandboxInfo = await createSandboxInstance(job.repoUrl, evaluationId);
+  // Workstream C: pass verified HEAD SHA for immediate pinning after clone
+  const sandboxInfo = await createSandboxInstance(job.repoUrl, evaluationId, ctx.repoCommitSha ?? undefined);
 
   ctx.sandboxId      = sandboxInfo.sandboxId;
   ctx.sandboxRepoPath = sandboxInfo.repoPath;

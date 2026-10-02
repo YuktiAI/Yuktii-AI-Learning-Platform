@@ -57,16 +57,24 @@ export interface SweAgentFinding {
 }
 
 export interface GitHistoryResult {
-  commitCount:         number;
-  firstCommit:         string | null;  // ISO date string
-  lastCommit:          string | null;
-  durationDays:        number;
-  avgCommitsPerDay:    number;
-  commitMessages:      string[];
-  largeCommitWarning:  boolean;        // true if any commit touches >50 files
-  suspectBulkUpload:   boolean;        // true if >40% of commits land on a single day
-  commitDensitySpike:  boolean;        // true if all commits in 0 days AND commitCount > 5
-  summary:             string;         // plain-language development process summary
+  commitCount:               number;
+  firstCommit:               string | null;  // ISO date string
+  lastCommit:                string | null;
+  durationDays:              number;
+  avgCommitsPerDay:          number;
+  commitMessages:            string[];       // up to 20 sampled non-trivial messages
+  largeCommitWarning:        boolean;        // true if any non-root, non-scaffold commit touches >50 files
+  suspectBulkUpload:         boolean;        // true if >40% of non-trivial commits land on a single day
+  commitDensitySpike:        boolean;        // true if all commits in 0 days AND commitCount > 5
+  // Workstream C: hardened metrics
+  descriptiveCommitRatio:    number | null;  // 0.0–1.0: fraction of commits with descriptive messages
+  trivialCommitCount:        number;         // commits with 0 insertions+deletions (whitespace / empty)
+  authorCommitterDiscrepancy: boolean;       // true if any |authorDate - committerDate| > 48h
+  isFork:                    boolean;        // populated from SubmissionRecord.isFork
+  forkParent:                string | null;  // e.g. "upstream-owner/repo"
+  specMilestoneCheck:        Array<{ milestone: string; artifactsFound: string[]; passed: boolean }> | null;
+  gitEvalVersion:            string;         // "v2.0"
+  summary:                   string;         // plain-language development process summary
 }
 
 export type RequirementStatus = 'PASS' | 'PARTIAL' | 'FAIL';
@@ -141,6 +149,11 @@ export interface PipelineContext {
   // Resubmission diff (populated if resubmission)
   repoCommitSha:        string | null;  // HEAD commit at evaluation time
 
+  // Workstream C: fork & author metadata (populated in 01-verify-submission)
+  isFork:               boolean;
+  forkParent:           string | null;
+  forkCreatedAt:        string | null;   // ISO timestamp of fork creation (used to filter pre-fork commits)
+
   // Phase 2 Section 9 fields
   harnessType:          'narrow' | 'broad' | null;
   harnessVersion:       string | null;
@@ -183,6 +196,9 @@ export function createPipelineContext(job: EvaluationJobData): PipelineContext {
     aiUsageAnalysis:       null,
     dynamicModelAnswer:    null,
     repoCommitSha:         null,
+    isFork:                false,
+    forkParent:            null,
+    forkCreatedAt:         null,
     harnessType:           null,
     harnessVersion:        null,
     executionScore:        null,

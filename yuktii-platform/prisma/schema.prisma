@@ -369,6 +369,12 @@ model SubmissionRecord {
   commitSha            String?    // HEAD commit SHA at time of submission
   submittedAt          DateTime   @default(now())
   previousSubmissionId String?    // links to a prior SubmissionRecord if this is a resubmission
+  // Workstream C: fork detection
+  isFork               Boolean    @default(false)  // true if GitHub reports this repo is a fork
+  forkParent           String?    // "owner/repo" of the upstream parent (if forked)
+  // Workstream D: spec versioning
+  specVersion          String?    // spec version used for this evaluation
+  specHash             String?    // SHA-256 hex of the spec evaluated against
 
   evaluation Evaluation? // 1-to-1: one evaluation per submission record
 
@@ -427,6 +433,12 @@ model Evaluation {
   humanReviewReason     String?  // why it was flagged: score_discrepancy | boundary_case | gave_up | duplicate
   agentTrajectory       String?  // JSON array of all agent iteration steps (last 100)
   promptInjectionFlags  String?  // JSON: list of suspicious strings found in student code
+  // Workstream C: git evaluation version & spec reference
+  gitEvalVersion        String?  @default("v2.0") // evaluation engine version: "v1.0" (legacy) | "v2.0" (hardened)
+  specVersion           String?  @default("v2.0") // spec version evaluated against
+  specHash              String?  // SHA-256 hex of canonical spec JSON
+  specMilestoneCheck    String?  // JSON: { milestone: string, artifactsFound: string[], passed: boolean }[]
+  specItemResults       String?  // JSON: per-FR-item verification results (supplements requirementResults)
 
   // Timestamps
   startedAt            DateTime?

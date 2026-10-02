@@ -198,14 +198,25 @@ function computeDevProcessScore(ctx: PipelineContext): number {
   // Large single commit warning (independent of density spike)
   if (g.largeCommitWarning) score -= 10;
 
-  // Commit message quality (proxy: avg message length)
-  const avgMsgLength = g.commitMessages.length > 0
-    ? g.commitMessages.reduce((s, m) => s + m.length, 0) / g.commitMessages.length
-    : 0;
-  if (avgMsgLength >= 20) score += 10;
-  else if (avgMsgLength < 5) score -= 10;
+  // Workstream C: descriptive commit ratio replaces avg-message-length proxy
+  if (g.descriptiveCommitRatio !== null && g.descriptiveCommitRatio !== undefined) {
+    if (g.descriptiveCommitRatio >= 0.7) score += 10;
+    else if (g.descriptiveCommitRatio < 0.2) score -= 10;
+    // 0.2-0.69: neutral (0)
+  } else {
+    // Legacy: fall back to avg message length if ratio unavailable (pre-v2.0 evals)
+    const avgMsgLength = g.commitMessages.length > 0
+      ? g.commitMessages.reduce((s, m) => s + m.length, 0) / g.commitMessages.length
+      : 0;
+    if (avgMsgLength >= 20) score += 10;
+    else if (avgMsgLength < 5) score -= 10;
+  }
 
-  return Math.min(100, Math.max(0, score));
+  // Workstream C: author/committer date discrepancy (rebase or backdating signal)
+  if (g.authorCommitterDiscrepancy) score -= 5;
+
+  // Hard floor/ceiling: 5-95 keeps extreme cases distinguishable
+  return Math.min(95, Math.max(5, score));
 }
 
 // ── Signal-based categories (via Claude) ─────────────────────────────────────

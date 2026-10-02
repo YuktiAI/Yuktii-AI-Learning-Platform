@@ -1,11 +1,11 @@
 /**
- * 11-save-results.ts — Stage 11: Save final results and trigger certificate.
+ * 11-save-results.ts â€” Stage 11: Save final results and trigger certificate.
  *
  * - Marks Evaluation.status = "completed"
  * - Sets completedAt timestamp
  * - If finalScore >= EVALUATION_PASS_SCORE, marks Submission as passed
  * - Model answer is only saved to the DB when the student has passed (never visible during failed attempts)
- * - If this is the final/capstone stage and all prior stages are complete → triggers certificate
+ * - If this is the final/capstone stage and all prior stages are complete â†’ triggers certificate
  * - Capstone stage uses EVALUATION_PASS_SCORE_CAPSTONE (60) not the standard 50
  */
 
@@ -54,14 +54,14 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
   const needsReview = Boolean(ctx.flaggedForHumanReview);
 
   // A-1: effectivePassed means: score passes AND hard gates pass AND no human review pending.
-  // If flagged for review, the submission sits in 'needs_review' — student sees
+  // If flagged for review, the submission sits in 'needs_review' â€” student sees
   // "under review," NOT "failed." The real (unmodified) score is always stored.
   const effectivePassed = passed && !needsReview;
 
   const evaluationStatus = needsReview ? 'needs_review' : (passed ? 'completed' : 'completed');
   const stageLabel = needsReview
     ? (ctx.humanReviewReason === 'scorer_disagreement'
-        ? 'Under Review — Scorer Disagreement'
+        ? 'Under Review â€” Scorer Disagreement'
         : 'Flagged for Human Review')
     : (effectivePassed ? 'Evaluation complete' : 'Evaluation complete');
 
@@ -81,7 +81,7 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
   // Model answer: only released after student has truly passed and no review is pending.
   const modelAnswerToStore = effectivePassed ? (ctx.dynamicModelAnswer ?? null) : null;
 
-  // ── Mark evaluation completed or needs_review ─────────────────────────────
+  // â”€â”€ Mark evaluation completed or needs_review â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   await prisma.evaluation.update({
     where: { id: evaluationId },
     data: {
@@ -98,10 +98,12 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
       promptInjectionFlags:    ctx.promptInjectionFlags.length > 0 ? JSON.stringify(ctx.promptInjectionFlags) : null,
       aiUsageAnalysis:         ctx.aiUsageAnalysis ? JSON.stringify(ctx.aiUsageAnalysis) : null,
       modelAnswer:             modelAnswerToStore,
+      // Workstream C: record git eval version for audit trail
+      gitEvalVersion:          ctx.gitHistoryResult?.gitEvalVersion ?? 'v2.0',
     } as any,
   });
 
-  // ── Update Submission record — NEVER revoke a prior pass ─────────────────
+  // â”€â”€ Update Submission record â€” NEVER revoke a prior pass â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Read existing record to check prior pass status and best score
   const existingSubmission = await prisma.submission.findFirst({
     where: { enrollmentId, stageId },
@@ -125,14 +127,14 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
       aiEvalFeedback:       ctx.mentorReport?.reasoning ?? '',
       aiEvalPassed:         finalPassedFlag,
       aiEvalAt:             new Date(),
-      // selfCheckCompleted gates stage unlock — set when truly passed (never reset)
+      // selfCheckCompleted gates stage unlock â€” set when truly passed (never reset)
       selfCheckCompleted:   finalSelfCheckFlag,
       // evaluationReleasedAt controls when the student sees the report
       evaluationReleasedAt: new Date(),
     },
   });
 
-  // ── Upsert StageProgress when stage is newly passed (Workstream B unlock) ─
+  // â”€â”€ Upsert StageProgress when stage is newly passed (Workstream B unlock) â”€
   // This ensures the next stage's submissionOpensAt is set from this passedAt date.
   if (effectivePassed) {
     try {
@@ -177,7 +179,7 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
             });
           }
         }
-        logger.info('StageProgress upserted — stage passed', { evaluationId, stageId, stageNumber });
+        logger.info('StageProgress upserted â€” stage passed', { evaluationId, stageId, stageNumber });
       }
     } catch (spErr) {
       // Non-fatal: log but don't fail the pipeline
@@ -185,7 +187,7 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
     }
   }
 
-  // ── Certificate trigger ────────────────────────────────────────────────────
+  // â”€â”€ Certificate trigger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Only triggered when capstone stage is passed AND human review is not pending.
   if (isCapstone && effectivePassed) {
     const enrollment = await prisma.enrollment.findUnique({
@@ -202,9 +204,9 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
       const trackComplete    = totalStagesCount > 0 && completedCount >= totalStagesCount;
 
       if (trackComplete) {
-        logger.info('All stages complete — issuing certificate', { evaluationId, enrollmentId });
+        logger.info('All stages complete â€” issuing certificate', { evaluationId, enrollmentId });
 
-        // A-3: Full-payload HMAC-SHA256 — bound to studentId|trackId|date|score
+        // A-3: Full-payload HMAC-SHA256 â€” bound to studentId|trackId|date|score
         const issueDate = new Date();
         // We need student and track IDs for the HMAC payload
         const enrollmentForCert = await prisma.enrollment.findUnique({
@@ -243,7 +245,7 @@ export async function saveResults(ctx: PipelineContext): Promise<void> {
     }
   }
 
-  // ── Update SubmissionRecord with final commitSha ────────────────────────────
+  // â”€â”€ Update SubmissionRecord with final commitSha â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (ctx.repoCommitSha) {
     await prisma.submissionRecord.update({
       where: { id: job.submissionRecordId },

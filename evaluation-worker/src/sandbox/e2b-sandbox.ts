@@ -65,17 +65,18 @@ const activeSandboxes = new Map<string, any>();
  * In local mode: creates a temp directory (DEV ONLY — no isolation).
  */
 export async function createSandboxInstance(
-  repoUrl:      string,
-  evaluationId: string
+  repoUrl:          string,
+  evaluationId:     string,
+  verifiedHeadSha?: string   // Workstream C: pin to this SHA immediately after clone
 ): Promise<SandboxInfo> {
   if (E2B_API_KEY) {
-    return createE2bSandbox(repoUrl, evaluationId);
+    return createE2bSandbox(repoUrl, evaluationId, verifiedHeadSha);
   }
   logger.warn(
     'E2B_API_KEY not set — using LOCAL fallback mode (NOT ISOLATED — dev only)',
     { evaluationId }
   );
-  return createLocalSandbox(repoUrl, evaluationId);
+  return createLocalSandbox(repoUrl, evaluationId, verifiedHeadSha);
 }
 
 /**
@@ -181,7 +182,7 @@ export async function destroySandbox(sandboxId: string): Promise<void> {
 
 // ── E2B implementation ─────────────────────────────────────────────────────────
 
-async function createE2bSandbox(repoUrl: string, evaluationId: string): Promise<SandboxInfo> {
+async function createE2bSandbox(repoUrl: string, evaluationId: string, verifiedHeadSha?: string): Promise<SandboxInfo> {
   const sdk = await getE2bSdk();
   if (!sdk || !sdk.Sandbox) {
     throw new Error('E2B SDK (@e2b/code-interpreter) not installed or incompatible. Run: npm install @e2b/code-interpreter');
@@ -198,11 +199,13 @@ async function createE2bSandbox(repoUrl: string, evaluationId: string): Promise<
   const sandboxId = sandbox.sandboxId ?? sandbox.id ?? `e2b-${Date.now()}`;
   activeSandboxes.set(sandboxId, sandbox);
 
-  // Clone the repository
+  // Workstream C: blobless partial clone + SHA pinning
+  // --filter=blob:none fetches full commit graph without blob data (fast, history-preserving)
+  // --no-single-branch ensures all branches are available for history analysis
   const repoPath = '/home/user/repo';
   const cloneResult = await runCommandInE2b(
     sandbox,
-    `git clone --depth=50 --no-recurse-submodules "${repoUrl}" "${repoPath}" 2>&1`,
+    `git clone --filter=blob:none --no-single-branch --no-recurse-submodules "${repoUrl}" "${repoPath}" 2>&1`,
     120_000 // 2 min for clone
   );
 
@@ -212,7 +215,23 @@ async function createE2bSandbox(repoUrl: string, evaluationId: string): Promise<
     throw new Error(`Failed to clone repository: ${cloneResult.stdout}\n${cloneResult.stderr}`);
   }
 
-  logger.info('E2B sandbox ready + repo cloned', { evaluationId, sandboxId, repoPath });
+  // Pin to verified HEAD SHA so force-pushes cannot alter the evaluated source
+  if (verifiedHeadSha && verifiedHeadSha !== 'unknown') {
+    const checkoutResult = await runCommandInE2b(
+      sandbox,
+      `git -C "${repoPath}" checkout "${verifiedHeadSha}" 2>&1`,
+      30_000
+    );
+    if (checkoutResult.exitCode !== 0) {
+      logger.warn('SHA pinning checkout failed — proceeding with default branch HEAD', {
+        evaluationId, verifiedHeadSha, stderr: checkoutResult.stderr,
+      });
+    } else {
+      logger.info('Repo pinned to verified HEAD SHA', { evaluationId, verifiedHeadSha });
+    }
+  }
+
+  logger.info('E2B sandbox ready + repo cloned (blobless)', { evaluationId, sandboxId, repoPath });
   return { sandboxId, repoPath, isLocal: false };
 }
 
@@ -236,20 +255,36 @@ async function runCommandInE2b(
 
 // ── Local fallback (DEV ONLY) ─────────────────────────────────────────────────
 
-async function createLocalSandbox(repoUrl: string, evaluationId: string): Promise<SandboxInfo> {
+async function createLocalSandbox(repoUrl: string, evaluationId: string, verifiedHeadSha?: string): Promise<SandboxInfo> {
   const localTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yuktii-eval-'));
   const repoPath    = path.join(localTmpDir, 'repo');
 
-  logger.info('Cloning repo locally (dev mode)', { evaluationId, repoPath });
+  logger.info('Cloning repo locally (blobless, dev mode)', { evaluationId, repoPath });
 
   try {
-    execSync(`git clone --depth=50 --no-recurse-submodules "${repoUrl}" "${repoPath}" 2>&1`, {
+    // Workstream C: blobless partial clone (matches E2B mode)
+    execSync(`git clone --filter=blob:none --no-single-branch --no-recurse-submodules "${repoUrl}" "${repoPath}" 2>&1`, {
       timeout: 120_000,
       stdio:   'pipe',
     });
   } catch (err: any) {
     fs.rmSync(localTmpDir, { recursive: true, force: true });
     throw new Error(`Failed to clone repository locally: ${err.message}`);
+  }
+
+  // Pin to verified HEAD SHA
+  if (verifiedHeadSha && verifiedHeadSha !== 'unknown') {
+    try {
+      execSync(`git -C "${repoPath}" checkout "${verifiedHeadSha}" 2>&1`, {
+        timeout: 15_000,
+        stdio: 'pipe',
+      });
+      logger.info('Repo pinned to verified HEAD SHA (local)', { evaluationId, verifiedHeadSha });
+    } catch (err: any) {
+      logger.warn('SHA pinning checkout failed (local) — using default branch HEAD', {
+        evaluationId, verifiedHeadSha, error: err.message,
+      });
+    }
   }
 
   // In local mode, sandboxId IS the tmp dir path (used for cleanup)

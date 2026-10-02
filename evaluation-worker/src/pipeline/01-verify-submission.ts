@@ -68,6 +68,12 @@ interface GitHubRepoResponse {
   full_name: string;
   private: boolean;
   default_branch: string;
+  fork: boolean;       // true if this repo is a fork of another
+  created_at: string;  // ISO timestamp of repo creation
+  parent?: {           // populated only when fork===true AND you hit /repos/:owner/:repo (not /repos list)
+    full_name: string;
+    default_branch: string;
+  };
 }
 
 interface GitHubBranchResponse {
@@ -131,7 +137,32 @@ export async function verifySubmission(ctx: PipelineContext): Promise<void> {
     stage: 'verify',
     repoFullName: repoData.full_name,
     repositoryId,
+    isFork: repoData.fork,
   });
+
+  // ── 3a. Fork detection — Workstream C ──────────────────────────────────────
+  // The /repos/:owner/:repo endpoint includes fork=true and a parent object.
+  let isFork = repoData.fork ?? false;
+  let forkParent: string | null = null;
+  let forkCreatedAt: string | null = repoData.created_at ?? null;
+
+  if (isFork && repoData.parent?.full_name) {
+    forkParent = repoData.parent.full_name;
+    logger.info('Fork detected', {
+      evaluationId,
+      stage: 'verify',
+      forkParent,
+      forkCreatedAt,
+    });
+  } else if (isFork) {
+    // Rare: parent field missing despite fork===true — fall back to repo creation timestamp
+    logger.warn('Fork detected but parent full_name missing', { evaluationId, stage: 'verify' });
+  }
+
+  // Propagate to pipeline context so 07-git-history can filter pre-fork commits
+  ctx.isFork = isFork;
+  ctx.forkParent = forkParent;
+  ctx.forkCreatedAt = forkCreatedAt;
 
   // ── 3. Fetch HEAD commit SHA for the default branch ───────────────────────────
   let headCommitSha: string;
@@ -200,6 +231,8 @@ export async function verifySubmission(ctx: PipelineContext): Promise<void> {
       repositoryId,
       commitSha: headCommitSha,
       previousSubmissionId: priorRecord?.id ?? null,
+      isFork,
+      forkParent,
     },
   });
 
