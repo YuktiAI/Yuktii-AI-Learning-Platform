@@ -24,8 +24,24 @@ export async function GET(req: NextRequest) {
   const stages = await prisma.stage.findMany({
     where: trackId ? { trackId } : undefined,
     orderBy: [{ trackId: 'asc' }, { stageNumber: 'asc' }],
+    include: {
+      track: {
+        select: { duration: true, _count: { select: { stages: true } } },
+      },
+    },
   });
-  return NextResponse.json({ stages });
+
+  // Annotate each stage with the computed default gap days (same formula as stage-gate.ts)
+  const annotatedStages = stages.map((s) => {
+    const stageCount = s.track._count.stages;
+    const defaultGapDays =
+      s.stageNumber <= 1 || stageCount <= 0
+        ? 0
+        : Math.round(s.track.duration / stageCount);
+    return { ...s, defaultGapDays };
+  });
+
+  return NextResponse.json({ stages: annotatedStages });
 }
 
 export async function POST(req: NextRequest) {
