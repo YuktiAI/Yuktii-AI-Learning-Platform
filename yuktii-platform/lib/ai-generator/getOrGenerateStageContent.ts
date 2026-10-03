@@ -16,7 +16,7 @@ import { AiGenerationError } from './AiGenerationError';
 import { generateStageContentFromGroq, getStageRole } from './generateStageContent';
 import { matchResources, type MatchedResource } from './matchResources';
 import type { MasterProject } from './generateMasterProject';
-import { hashProjectSpecification } from './project-spec-schema';
+import { hashProjectSpecification, toStudentProjectSpecification } from './project-spec-schema';
 
 export interface StageContentForDisplay {
   id: string;
@@ -32,6 +32,9 @@ export interface StageContentForDisplay {
   generationStatus: string;  // 'SUCCESS' | 'FAILED'
   matchedResources: MatchedResource[];
   generatedAt: Date;
+  projectSpec?: any;
+  implementationPath?: string | null;
+  simulationTools?: any[];
 }
 
 export async function getOrGenerateStageContent(params: {
@@ -63,7 +66,14 @@ export async function getOrGenerateStageContent(params: {
   // ── Step 2: Verify master project is locked ───────────────────────────────
   const enrollment = await prisma.enrollment.findUnique({
     where: { id: enrollmentId },
-    select: { aiVariantJson: true, aiVariantLockedAt: true, iotMode: true },
+    select: {
+      id: true,
+      studentId: true,
+      aiVariantJson: true,
+      aiVariantLockedAt: true,
+      iotMode: true,
+      implementationPath: true,
+    },
   });
 
   if (!enrollment) {
@@ -86,6 +96,31 @@ export async function getOrGenerateStageContent(params: {
     throw new AiGenerationError('master', 'Stored master project JSON is invalid');
   }
 
+  // Check stage-level or enrollment-level implementationPath
+  const stageRecord = await prisma.stage.findFirst({
+    where: {
+      track: { enrollments: { some: { id: enrollmentId } } },
+      stageNumber,
+    },
+    select: { id: true },
+  });
+
+  let stageImplementationPath: 'hardware' | 'simulation' | null = null;
+  if (stageRecord) {
+    const sp = await prisma.stageProgress.findUnique({
+      where: { enrollmentId_stageId: { enrollmentId, stageId: stageRecord.id } },
+      select: { implementationPath: true },
+    });
+    if (sp?.implementationPath === 'hardware' || sp?.implementationPath === 'simulation') {
+      stageImplementationPath = sp.implementationPath;
+    }
+  }
+
+  const activePath = (stageImplementationPath ||
+    enrollment.implementationPath ||
+    enrollment.iotMode ||
+    (domainSlug.includes('iot') || domainSlug.includes('robotics') ? 'simulation' : null)) as 'hardware' | 'simulation' | null;
+
   // ── Step 3: Generate stage content (Real multi-provider generation) ──────
   let structuredResult;
   try {
@@ -103,6 +138,7 @@ export async function getOrGenerateStageContent(params: {
         stageNumber,
         totalStages,
         masterProject,
+        implementationPath: activePath,
       }),
       timeoutPromise,
     ]);
@@ -135,7 +171,35 @@ export async function getOrGenerateStageContent(params: {
 
   const generated = structuredResult.content;
   const { toProjectSpecification } = await import('./structured-generation');
-  const projectSpec = toProjectSpecification(generated, { domainName, domainSlug, levelName, stageNumber, totalStages });
+  const projectSpec = toProjectSpecification(generated, {
+    domainName,
+    domainSlug,
+    levelName,
+    stageNumber,
+    totalStages,
+    implementationPath: activePath,
+    simulationTools: structuredResult.simulationTools,
+  });
+
+  // Workstream D: Resource reachability validation
+  try {
+    const { validateAndFixResourceUrls } = await import('./resource-validator');
+    if (projectSpec.resourcesAndDatasets && projectSpec.resourcesAndDatasets.length > 0) {
+      const validated = await validateAndFixResourceUrls(
+        projectSpec.resourcesAndDatasets.map((r) => ({ url: r.url, title: r.title })),
+        domainSlug.includes('iot') || domainSlug.includes('robotics') ? 'docs' : 'datasets'
+      );
+      projectSpec.resourcesAndDatasets = projectSpec.resourcesAndDatasets.map((r, i) => ({
+        ...r,
+        url: validated[i]?.url || r.url,
+        isReachable: validated[i]?.isReachable ?? true,
+        verifiedAt: new Date().toISOString(),
+      }));
+    }
+  } catch (valErr) {
+    console.warn('[getOrGenerateStageContent] Resource reachability validation skipped:', valErr);
+  }
+
   const specHash = hashProjectSpecification(projectSpec);
 
   // ── Step 4: Match resources by tags ──────────────────────────────────────
@@ -242,9 +306,18 @@ function toDisplayModel(
     estimatedEffort: string;
     generationStatus: string;
     generatedAt: Date;
+    projectSpec?: string | null;
   },
   matchedResources: MatchedResource[],
 ): StageContentForDisplay {
+  let projectSpecObj: any = null;
+  if (row.projectSpec) {
+    try {
+      const parsed = JSON.parse(row.projectSpec);
+      projectSpecObj = toStudentProjectSpecification(parsed);
+    } catch {}
+  }
+
   return {
     id:                      row.id,
     enrollmentId:            row.enrollmentId,
@@ -259,5 +332,8 @@ function toDisplayModel(
     generationStatus:        row.generationStatus,
     matchedResources,
     generatedAt:             row.generatedAt,
+    projectSpec:             projectSpecObj,
+    implementationPath:      projectSpecObj?.implementationPath || null,
+    simulationTools:         projectSpecObj?.simulationTools || [],
   };
 }

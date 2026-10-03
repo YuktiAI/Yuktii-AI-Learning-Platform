@@ -34,12 +34,12 @@ function test(name: string, fn: () => void) {
   }
 }
 
-function assert(condition: boolean, message: string) {
+function localAssert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
 }
 
-function assertEqual<T>(actual: T, expected: T, label?: string) {
-  assert(
+function localAssertEqual<T>(actual: T, expected: T, label?: string) {
+  localAssert(
     actual === expected,
     `${label ? label + ': ' : ''}expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
   );
@@ -100,34 +100,34 @@ function detectBulkUpload(
 console.log('\n[C-1] Descriptive vs placeholder commit messages');
 
 test('placeholder: "initial commit"', () => {
-  assert(!isDescriptiveMessage('initial commit'), 'should not be descriptive');
+  localAssert(!isDescriptiveMessage('initial commit'), 'should not be descriptive');
 });
 test('placeholder: "update"', () => {
-  assert(!isDescriptiveMessage('update'), 'should not be descriptive');
+  localAssert(!isDescriptiveMessage('update'), 'should not be descriptive');
 });
 test('placeholder: "fix"', () => {
-  assert(!isDescriptiveMessage('fix'), 'should not be descriptive');
+  localAssert(!isDescriptiveMessage('fix'), 'should not be descriptive');
 });
 test('placeholder: "wip"', () => {
-  assert(!isDescriptiveMessage('wip'), 'should not be descriptive');
+  localAssert(!isDescriptiveMessage('wip'), 'should not be descriptive');
 });
 test('merge commit excluded', () => {
-  assert(!isDescriptiveMessage('Merge branch main into feature/auth'), 'merge should not be descriptive');
+  localAssert(!isDescriptiveMessage('Merge branch main into feature/auth'), 'merge should not be descriptive');
 });
 test('too short (< 10 chars)', () => {
-  assert(!isDescriptiveMessage('add file'), 'too short');
+  localAssert(!isDescriptiveMessage('add file'), 'too short');
 });
 test('descriptive: "feat: add user authentication with JWT tokens"', () => {
-  assert(isDescriptiveMessage('feat: add user authentication with JWT tokens'), 'should be descriptive');
+  localAssert(isDescriptiveMessage('feat: add user authentication with JWT tokens'), 'should be descriptive');
 });
 test('descriptive: "fix null pointer in payment handler"', () => {
-  assert(isDescriptiveMessage('fix null pointer in payment handler'), 'should be descriptive');
+  localAssert(isDescriptiveMessage('fix null pointer in payment handler'), 'should be descriptive');
 });
 test('descriptive: "refactor sensor polling to use async/await"', () => {
-  assert(isDescriptiveMessage('refactor sensor polling to use async/await'), 'should be descriptive');
+  localAssert(isDescriptiveMessage('refactor sensor polling to use async/await'), 'should be descriptive');
 });
 test('only 2 words → not descriptive', () => {
-  assert(!isDescriptiveMessage('add authentication'), 'only 2 words should not qualify');
+  localAssert(!isDescriptiveMessage('add authentication'), 'only 2 words should not qualify');
 });
 
 // ─── C-2: isScaffoldPath ─────────────────────────────────────────────────────
@@ -135,34 +135,34 @@ test('only 2 words → not descriptive', () => {
 console.log('\n[C-2] Scaffold/lockfile path detection');
 
 test('package-lock.json → scaffold', () => {
-  assert(isScaffoldPath('package-lock.json'), 'should be scaffold');
+  localAssert(isScaffoldPath('package-lock.json'), 'should be scaffold');
 });
 test('yarn.lock → scaffold', () => {
-  assert(isScaffoldPath('yarn.lock'), 'should be scaffold');
+  localAssert(isScaffoldPath('yarn.lock'), 'should be scaffold');
 });
 test('pnpm-lock.yaml → scaffold', () => {
-  assert(isScaffoldPath('pnpm-lock.yaml'), 'should be scaffold');
+  localAssert(isScaffoldPath('pnpm-lock.yaml'), 'should be scaffold');
 });
 test('node_modules/lodash/index.js → scaffold', () => {
-  assert(isScaffoldPath('node_modules/lodash/index.js'), 'should be scaffold');
+  localAssert(isScaffoldPath('node_modules/lodash/index.js'), 'should be scaffold');
 });
 test('dist/bundle.js → scaffold', () => {
-  assert(isScaffoldPath('dist/bundle.js'), 'should be scaffold');
+  localAssert(isScaffoldPath('dist/bundle.js'), 'should be scaffold');
 });
 test('.next/static/chunks/main.js → scaffold', () => {
-  assert(isScaffoldPath('.next/static/chunks/main.js'), 'should be scaffold');
+  localAssert(isScaffoldPath('.next/static/chunks/main.js'), 'should be scaffold');
 });
 test('src/index.ts → NOT scaffold', () => {
-  assert(!isScaffoldPath('src/index.ts'), 'source file should not be scaffold');
+  localAssert(!isScaffoldPath('src/index.ts'), 'source file should not be scaffold');
 });
 test('README.md → NOT scaffold', () => {
-  assert(!isScaffoldPath('README.md'), 'docs should not be scaffold');
+  localAssert(!isScaffoldPath('README.md'), 'docs should not be scaffold');
 });
 test('app/api/auth/route.ts → NOT scaffold', () => {
-  assert(!isScaffoldPath('app/api/auth/route.ts'), 'app code should not be scaffold');
+  localAssert(!isScaffoldPath('app/api/auth/route.ts'), 'app code should not be scaffold');
 });
 test('requirements.txt → scaffold', () => {
-  assert(isScaffoldPath('requirements.txt'), 'Python lock file should be scaffold');
+  localAssert(isScaffoldPath('requirements.txt'), 'Python lock file should be scaffold');
 });
 
 // ─── C-3: detectBulkUpload ────────────────────────────────────────────────────
@@ -174,14 +174,14 @@ test('all 8 commits on same day → commitDensitySpike', () => {
     date: '2026-10-01T10:00:00Z', message: `commit ${i}`,
   }));
   const { commitDensitySpike } = detectBulkUpload(commits, 0);
-  assert(commitDensitySpike, 'should detect density spike');
+  localAssert(commitDensitySpike, 'should detect density spike');
 });
 test('5 commits on same day → NOT spike (threshold is > 5)', () => {
   const commits = Array.from({ length: 5 }, (_, i) => ({
     date: '2026-10-01T10:00:00Z', message: `commit ${i}`,
   }));
   const { commitDensitySpike } = detectBulkUpload(commits, 0);
-  assert(!commitDensitySpike, 'exactly 5 should not trigger spike (needs > 5)');
+  localAssert(!commitDensitySpike, 'exactly 5 should not trigger spike (needs > 5)');
 });
 test('5 out of 8 commits on same day → suspectBulkUpload (62.5%)', () => {
   const commits = [
@@ -195,7 +195,7 @@ test('5 out of 8 commits on same day → suspectBulkUpload (62.5%)', () => {
     { date: '2026-10-07T10:00:00Z', message: 'h' },
   ];
   const { suspectBulkUpload } = detectBulkUpload(commits, 6);
-  assert(suspectBulkUpload, 'should detect suspect bulk upload');
+  localAssert(suspectBulkUpload, 'should detect suspect bulk upload');
 });
 test('evenly spread commits → no bulk upload', () => {
   const commits = [
@@ -206,7 +206,7 @@ test('evenly spread commits → no bulk upload', () => {
     { date: '2026-10-05T10:00:00Z', message: 'day 5 a' },
   ];
   const { suspectBulkUpload, commitDensitySpike } = detectBulkUpload(commits, 4);
-  assert(!suspectBulkUpload && !commitDensitySpike, 'evenly spread should be clean');
+  localAssert(!suspectBulkUpload && !commitDensitySpike, 'evenly spread should be clean');
 });
 
 // ─── C-4: Duration allows 0 days ─────────────────────────────────────────────
@@ -217,19 +217,19 @@ test('same-day commits → durationDays = 0 (not artificially bumped to 1)', () 
   const t0 = new Date('2026-10-01T09:00:00Z').getTime();
   const t1 = new Date('2026-10-01T17:00:00Z').getTime();
   const durationDays = Math.floor((t1 - t0) / 86_400_000);
-  assertEqual(durationDays, 0, 'same-day duration should be 0');
+  localAssertEqual(durationDays, 0, 'same-day duration should be 0');
 });
 test('next-day commits → durationDays = 1', () => {
   const t0 = new Date('2026-10-01T00:00:00Z').getTime();
   const t1 = new Date('2026-10-02T00:00:00Z').getTime();
   const durationDays = Math.floor((t1 - t0) / 86_400_000);
-  assertEqual(durationDays, 1);
+  localAssertEqual(durationDays, 1);
 });
 test('3-day span → durationDays = 3', () => {
   const t0 = new Date('2026-10-01T00:00:00Z').getTime();
   const t1 = new Date('2026-10-04T00:00:00Z').getTime();
   const durationDays = Math.floor((t1 - t0) / 86_400_000);
-  assertEqual(durationDays, 3);
+  localAssertEqual(durationDays, 3);
 });
 
 // ─── C-5: Author/committer discrepancy ────────────────────────────────────────
@@ -241,18 +241,18 @@ const DISCREPANCY_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 test('author 72h before committer → discrepancy flagged', () => {
   const authorTs = new Date('2026-09-28T00:00:00Z').getTime();
   const committerTs = new Date('2026-10-01T00:00:00Z').getTime();
-  assert(Math.abs(authorTs - committerTs) > DISCREPANCY_THRESHOLD_MS, 'should flag 72h gap');
+  localAssert(Math.abs(authorTs - committerTs) > DISCREPANCY_THRESHOLD_MS, 'should flag 72h gap');
 });
 test('author 24h before committer → NO discrepancy', () => {
   const authorTs = new Date('2026-09-30T00:00:00Z').getTime();
   const committerTs = new Date('2026-10-01T00:00:00Z').getTime();
-  assert(Math.abs(authorTs - committerTs) <= DISCREPANCY_THRESHOLD_MS, 'should NOT flag 24h gap');
+  localAssert(Math.abs(authorTs - committerTs) <= DISCREPANCY_THRESHOLD_MS, 'should NOT flag 24h gap');
 });
 test('exactly 48h → boundary: NOT flagged (> required, not >=)', () => {
   const authorTs = new Date('2026-09-29T00:00:00Z').getTime();
   const committerTs = new Date('2026-10-01T00:00:00Z').getTime();
   const diff = Math.abs(authorTs - committerTs);
-  assert(diff <= DISCREPANCY_THRESHOLD_MS, 'exactly 48h should not be flagged');
+  localAssert(diff <= DISCREPANCY_THRESHOLD_MS, 'exactly 48h should not be flagged');
 });
 
 // ─── C-6: Fork boundary filtering ─────────────────────────────────────────────
@@ -271,7 +271,7 @@ test('post-fork commits: only those after forkCreatedAt are counted', () => {
     const ts = new Date(c.authorDate).getTime();
     return !isNaN(ts) && ts >= forkCreatedAt;
   });
-  assertEqual(postFork.length, 2, 'should only count 2 post-fork commits');
+  localAssertEqual(postFork.length, 2, 'should only count 2 post-fork commits');
 });
 test('no post-fork commits → use all (benefit of the doubt)', () => {
   const forkCreatedAt = new Date('2026-10-05T00:00:00Z').getTime();
@@ -284,7 +284,7 @@ test('no post-fork commits → use all (benefit of the doubt)', () => {
   });
   // Falls back to all commits since post-fork is empty
   const effective = postFork.length > 0 ? postFork : allCommits;
-  assertEqual(effective.length, 1, 'should use all commits as fallback');
+  localAssertEqual(effective.length, 1, 'should use all commits as fallback');
 });
 
 // ─── C-7: Descriptive commit ratio scoring ────────────────────────────────────
@@ -299,22 +299,22 @@ function simulateDevProcessRatioScore(ratio: number): number {
 }
 
 test('ratio = 1.0 (100% descriptive) → +10', () => {
-  assertEqual(simulateDevProcessRatioScore(1.0), 60);
+  localAssertEqual(simulateDevProcessRatioScore(1.0), 60);
 });
 test('ratio = 0.7 (70% descriptive) → +10 (threshold inclusive)', () => {
-  assertEqual(simulateDevProcessRatioScore(0.7), 60);
+  localAssertEqual(simulateDevProcessRatioScore(0.7), 60);
 });
 test('ratio = 0.5 (50% descriptive) → 0 (neutral)', () => {
-  assertEqual(simulateDevProcessRatioScore(0.5), 50);
+  localAssertEqual(simulateDevProcessRatioScore(0.5), 50);
 });
 test('ratio = 0.2 (20% descriptive) → 0 (boundary: < 0.2 needed for penalty)', () => {
-  assertEqual(simulateDevProcessRatioScore(0.2), 50);
+  localAssertEqual(simulateDevProcessRatioScore(0.2), 50);
 });
 test('ratio = 0.19 (19% descriptive) → -10', () => {
-  assertEqual(simulateDevProcessRatioScore(0.19), 40);
+  localAssertEqual(simulateDevProcessRatioScore(0.19), 40);
 });
 test('ratio = 0.0 (0% descriptive) → -10', () => {
-  assertEqual(simulateDevProcessRatioScore(0.0), 40);
+  localAssertEqual(simulateDevProcessRatioScore(0.0), 40);
 });
 
 // ─── C-8: gitEvalVersion ─────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ console.log('\n[C-8] gitEvalVersion is always v2.0');
 test('GIT_EVAL_VERSION constant is v2.0', () => {
   // This mirrors the constant defined in 07-git-history.ts
   const GIT_EVAL_VERSION = 'v2.0';
-  assertEqual(GIT_EVAL_VERSION, 'v2.0');
+  localAssertEqual(GIT_EVAL_VERSION, 'v2.0');
 });
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

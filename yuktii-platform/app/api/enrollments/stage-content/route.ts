@@ -83,6 +83,15 @@ async function handleStageContent(enrollmentId: string, stageNumber: number, for
     });
 
     if (existing && existing.generationStatus === 'SUCCESS' && existing.problemStatement && existing.problemStatement.trim().length > 0) {
+      let studentSpec: any = null;
+      if (existing.projectSpec) {
+        try {
+          const parsed = JSON.parse(existing.projectSpec);
+          const { toStudentProjectSpecification } = await import('@/lib/ai-generator/project-spec-schema');
+          studentSpec = toStudentProjectSpecification(parsed);
+        } catch {}
+      }
+
       return NextResponse.json({
         ok: true,
         status: 'ready',
@@ -98,6 +107,9 @@ async function handleStageContent(enrollmentId: string, stageNumber: number, for
           acceptanceCriteria: safeParse(existing.acceptanceCriteria, []),
           estimatedEffort: existing.estimatedEffort || '2-3 hours',
           generationStatus: existing.generationStatus,
+          projectSpec: studentSpec,
+          implementationPath: studentSpec?.implementationPath || null,
+          simulationTools: studentSpec?.simulationTools || [],
         },
       });
     }
@@ -160,6 +172,9 @@ async function handleStageContent(enrollmentId: string, stageNumber: number, for
         acceptanceCriteria: generated.acceptanceCriteria,
         estimatedEffort: generated.estimatedEffort,
         generationStatus: generated.generationStatus,
+        projectSpec: generated.projectSpec,
+        implementationPath: generated.implementationPath,
+        simulationTools: generated.simulationTools,
       },
     });
   } catch (err: any) {

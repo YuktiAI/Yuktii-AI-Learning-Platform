@@ -139,6 +139,7 @@ model Enrollment {
   razorpayPaymentId String?
   iotMode           String?   // "hardware" | "simulation" — locked choice for IoT tracks
   roboticsMode      String?   // NEW: "hardware" | "simulation" — locked choice for Robotics tracks
+  implementationPath String?  // "hardware" | "simulation" — unified choice for IoT and Robotics tracks
   aiVariantJson        String?   // Phase 3: JSON stored as string (SQLite-compatible), unique AI-generated scenario
   aiVariantGeneratedAt DateTime? // Phase 3: when the variant was first generated
   aiVariantLockedAt    DateTime? // Phase 3: once set, variant is LOCKED — no further changes allowed
@@ -178,6 +179,7 @@ model Submission {
   flaggedForManualReview Boolean    @default(false) // 10-15% random spot-check for admin QA
   manualReviewStatus     String?    // "PENDING" | "APPROVED" | "OVERRIDDEN"
   manualReviewNotes      String?
+  implementationPath     String?    // "hardware" | "simulation"
 
   @@unique([enrollmentId, stageId])
 }
@@ -372,9 +374,10 @@ model SubmissionRecord {
   // Workstream C: fork detection
   isFork               Boolean    @default(false)  // true if GitHub reports this repo is a fork
   forkParent           String?    // "owner/repo" of the upstream parent (if forked)
-  // Workstream D: spec versioning
+  // Workstream D: spec versioning & implementation path
   specVersion          String?    // spec version used for this evaluation
   specHash             String?    // SHA-256 hex of the spec evaluated against
+  implementationPath   String?    // "hardware" | "simulation"
 
   evaluation Evaluation? // 1-to-1: one evaluation per submission record
 
@@ -540,3 +543,36 @@ model StageProgress {
   @@index([stageId])
   @@index([userId])
 }
+
+// ─────────────────────────────────────────────────────────────
+// Workstream D — Curated Simulation Tool Registry
+//
+// When generating specs for simulation-capable domains (IoT, Robotics, AI-ML),
+// the spec generator SELECTS from this curated list rather than hallucinating
+// tool names. Ensures reproducible, student-usable tool references.
+// ─────────────────────────────────────────────────────────────
+
+model CuratedSimulationTool {
+  id            String   @id @default(cuid())
+  name          String   // e.g. "Wokwi", "TinkerCAD", "Proteus", "Webots", "Gazebo", "CoppeliaSim"
+  url           String   // Direct link students can open without signup, or with free tier
+  domains       String   // JSON array of domain slugs this tool is valid for: ["iot","robotics"]
+  category      String   // "circuit-simulator" | "robot-simulator" | "cloud-iot" | "embedded-emulator"
+  license       String   @default("Open Source")
+  openSource    Boolean  @default(true)
+  freeToUse     Boolean  @default(true)
+  gpuRequired   Boolean  @default(false)
+  os            String   @default("Linux, Windows, macOS")
+  bestFor       String?
+  verifiedAt    DateTime @default(now())
+  freeTier      Boolean  @default(true)  // true if fully free for students
+  browserBased  Boolean  @default(false) // true if no install needed (runs in browser)
+  description   String   // One-sentence plain-english summary for spec context
+  difficulty    String   @default("all") // "beginner" | "intermediate" | "advanced" | "all"
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([domains])
+}
+

@@ -105,11 +105,37 @@ Output ONLY valid JSON — an array with one entry per requirement:
 
     ctx.requirementResults = results;
 
+    // Workstream D: Map to specItemResults with declared verification methods
+    let specItemResults: any[] = [];
+    if (ctx.fullProjectSpec?.functionalRequirements && Array.isArray(ctx.fullProjectSpec.functionalRequirements)) {
+      specItemResults = ctx.fullProjectSpec.functionalRequirements.map((fr: any) => {
+        const matchingResult = results.find(
+          (r) =>
+            r.reqId === fr.id ||
+            r.reqText.includes(`[${fr.id}]`) ||
+            r.reqText.toLowerCase().includes(fr.text.toLowerCase().slice(0, 30))
+        );
+        return {
+          id: fr.id,
+          text: fr.text,
+          required: Boolean(fr.required),
+          verifyMethod: fr.verify?.method || 'llm_judge',
+          status: matchingResult ? matchingResult.status : 'PARTIAL',
+          evidence: matchingResult?.evidence || '',
+          missing: matchingResult?.missing || '',
+        };
+      });
+      ctx.specItemResults = specItemResults;
+    }
+
     // Persist
     const prisma = getPrisma();
     await prisma.evaluation.update({
       where: { id: evaluationId },
-      data: { requirementResults: JSON.stringify(results) },
+      data: {
+        requirementResults: JSON.stringify(results),
+        ...(specItemResults.length > 0 ? { specItemResults: JSON.stringify(specItemResults) } : {}),
+      },
     });
 
     const passCount    = results.filter(r => r.status === 'PASS').length;

@@ -188,7 +188,10 @@ Write a structured mentor report as JSON with these exact fields:
   ]
 }
 
-Be specific. Reference actual files and requirements. Don't use vague language. Make it feel like real mentor feedback.
+CRITICAL MENTOR RULES (Workstream D):
+1. Always reference specific requirement IDs (e.g., 'FR-03 not met because...') when listing gaps or unmet criteria.
+2. For IoT or Robotics tracks: If the student used the simulation path (${ctx.implementationPath === 'simulation' ? 'SIMULATION' : 'standard'}), provide software/simulation recommendations. NEVER tell a simulation-path student to buy physical hardware or penalize them for not having physical boards.
+3. Be specific. Reference actual files and requirements. Don't use vague language. Make it feel like real mentor feedback.
 `.trim();
 }
 

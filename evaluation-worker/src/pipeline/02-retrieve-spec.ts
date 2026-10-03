@@ -3,10 +3,12 @@
  *
  * Fetches the Groq-generated StageGeneratedContent for this enrollment+stage.
  * This is the ORIGINAL, LOCKED specification — we NEVER regenerate it here.
- * The spec is already embedded in job.projectSpec (set by the API route), but
- * this stage validates it's still accurate against the DB copy.
  *
- * Also fetches domain metadata (slug, name) for domain-aware evaluation later.
+ * Workstream D:
+ * - Loads full machine-readable ProjectSpecification
+ * - Stores specVersion & specHash onto Evaluation
+ * - Retrieves implementationPath (hardware vs simulation)
+ * - Sets stable requirement IDs (FR-01, FR-02...) for downstream scoring
  */
 
 import { getPrisma } from '../db.js';
@@ -15,32 +17,31 @@ import type { PipelineContext } from '../pipeline-context.js';
 
 export async function retrieveSpec(ctx: PipelineContext): Promise<void> {
   const { job, evaluationId } = ctx;
-  const { enrollmentId, stageId } = job;
+  const { enrollmentId, stageId, submissionRecordId } = job;
   const prisma = getPrisma();
 
-  logger.info('Retrieving project specification', { evaluationId, stage: 'retrieveSpec' });
+  logger.info('Retrieving project specification (Workstream D)', { evaluationId, stage: 'retrieveSpec' });
 
-  // The spec is already passed in job.projectSpec from the API route.
-  // Validate it has content; if empty, try to load from DB.
-  const hasSpec = (
-    job.projectSpec.requirements.length > 0 ||
-    job.projectSpec.problemStatement.length > 0
-  );
-
-  if (hasSpec) {
-    logger.info('Project spec from job payload — valid', {
-      evaluationId,
-      stage: 'retrieveSpec',
-      requirementsCount: job.projectSpec.requirements.length,
-      criteriaCount: job.projectSpec.acceptanceCriteria.length,
-    });
-    return;
+  // 1. Check SubmissionRecord for implementationPath and spec metadata
+  if (submissionRecordId) {
+    try {
+      const subRec = await prisma.submissionRecord.findUnique({
+        where: { id: submissionRecordId },
+        select: { implementationPath: true, specVersion: true, specHash: true },
+      });
+      if (subRec) {
+        if (subRec.implementationPath === 'hardware' || subRec.implementationPath === 'simulation') {
+          ctx.implementationPath = subRec.implementationPath;
+        }
+        if (subRec.specVersion) ctx.specVersion = subRec.specVersion;
+        if (subRec.specHash) ctx.specHash = subRec.specHash;
+      }
+    } catch (e) {
+      logger.warn('Failed to query SubmissionRecord for implementationPath', { error: String(e) });
+    }
   }
 
-  // Fallback: load from DB (handles case where job was created before spec was set)
-  logger.warn('Job spec was empty — loading from DB', { evaluationId, stage: 'retrieveSpec' });
-
-  // Find the stage number from the stage record
+  // 2. Find the stage number from the stage record
   const stageRecord = await prisma.stage.findUnique({
     where: { id: stageId },
     select: { stageNumber: true },
@@ -50,6 +51,7 @@ export async function retrieveSpec(ctx: PipelineContext): Promise<void> {
     throw new Error(`Stage ${stageId} not found in database.`);
   }
 
+  // 3. Load StageGeneratedContent
   const generatedContent = await prisma.stageGeneratedContent.findUnique({
     where: {
       enrollmentId_stageNumber: {
@@ -59,48 +61,93 @@ export async function retrieveSpec(ctx: PipelineContext): Promise<void> {
     },
   });
 
-  if (!generatedContent) {
-    throw new Error(
-      `No generated project specification found for enrollment ${enrollmentId}, ` +
-      `stage ${stageRecord.stageNumber}. The project must be generated before evaluation can run.`
-    );
+  if (generatedContent) {
+    ctx.specVersion = generatedContent.specVersion || ctx.specVersion || 'v2.0';
+    if (generatedContent.specHash) {
+      ctx.specHash = generatedContent.specHash;
+    }
+
+    if (generatedContent.projectSpec) {
+      try {
+        const fullSpec = JSON.parse(generatedContent.projectSpec);
+        ctx.fullProjectSpec = fullSpec;
+
+        if (fullSpec.implementationPath) {
+          ctx.implementationPath = fullSpec.implementationPath;
+        }
+
+        // Downstream scoring (Stage 8, Stage 10) benefits from exact stable IDs: [FR-01] Text
+        if (Array.isArray(fullSpec.functionalRequirements) && fullSpec.functionalRequirements.length > 0) {
+          job.projectSpec.requirements = fullSpec.functionalRequirements.map(
+            (fr: any) => `[${fr.id}] ${fr.text}`
+          );
+        }
+      } catch (err) {
+        logger.warn('Failed to parse full projectSpec JSON', { error: String(err) });
+      }
+    }
+
+    // Persist specHash and specVersion to Evaluation
+    await prisma.evaluation.update({
+      where: { id: evaluationId },
+      data: {
+        specVersion: ctx.specVersion,
+        ...(ctx.specHash ? { specHash: ctx.specHash } : {}),
+      },
+    }).catch(() => {});
   }
 
-  if (generatedContent.generationStatus === 'FAILED') {
-    throw new Error(
-      `Project specification generation previously failed for enrollment ${enrollmentId}, ` +
-      `stage ${stageRecord.stageNumber}. Please retry project generation before submitting for evaluation.`
-    );
+  // 4. Validate or populate in-memory job.projectSpec
+  const hasSpec = (
+    job.projectSpec.requirements.length > 0 ||
+    job.projectSpec.problemStatement.length > 0
+  );
+
+  if (!hasSpec) {
+    if (!generatedContent) {
+      throw new Error(
+        `No generated project specification found for enrollment ${enrollmentId}, ` +
+        `stage ${stageRecord.stageNumber}. The project must be generated before evaluation can run.`
+      );
+    }
+
+    if (generatedContent.generationStatus === 'FAILED') {
+      throw new Error(
+        `Project specification generation previously failed for enrollment ${enrollmentId}, ` +
+        `stage ${stageRecord.stageNumber}. Please retry project generation before submitting for evaluation.`
+      );
+    }
+
+    let requirements: string[] = [];
+    let acceptanceCriteria: string[] = [];
+
+    try {
+      requirements = JSON.parse(generatedContent.requirements);
+    } catch {
+      logger.warn('Failed to parse requirements JSON', { evaluationId, stage: 'retrieveSpec' });
+    }
+
+    try {
+      acceptanceCriteria = JSON.parse(generatedContent.acceptanceCriteria);
+    } catch {
+      logger.warn('Failed to parse acceptanceCriteria JSON', { evaluationId, stage: 'retrieveSpec' });
+    }
+
+    job.projectSpec = {
+      problemStatement:  generatedContent.problemStatement,
+      requirements,
+      acceptanceCriteria,
+      estimatedEffort:   generatedContent.estimatedEffort,
+    };
   }
 
-  // Parse and populate the job spec from DB
-  let requirements: string[] = [];
-  let acceptanceCriteria: string[] = [];
-
-  try {
-    requirements = JSON.parse(generatedContent.requirements);
-  } catch {
-    logger.warn('Failed to parse requirements JSON', { evaluationId, stage: 'retrieveSpec' });
-  }
-
-  try {
-    acceptanceCriteria = JSON.parse(generatedContent.acceptanceCriteria);
-  } catch {
-    logger.warn('Failed to parse acceptanceCriteria JSON', { evaluationId, stage: 'retrieveSpec' });
-  }
-
-  // Update the in-memory job spec (pipeline stages read from job.projectSpec)
-  job.projectSpec = {
-    problemStatement:  generatedContent.problemStatement,
-    requirements,
-    acceptanceCriteria,
-    estimatedEffort:   generatedContent.estimatedEffort,
-  };
-
-  logger.info('Project spec loaded from DB', {
+  logger.info('Project spec loaded successfully', {
     evaluationId,
     stage: 'retrieveSpec',
-    requirementsCount: requirements.length,
-    criteriaCount: acceptanceCriteria.length,
+    specVersion: ctx.specVersion,
+    specHash: ctx.specHash,
+    implementationPath: ctx.implementationPath,
+    requirementsCount: job.projectSpec.requirements.length,
+    criteriaCount: job.projectSpec.acceptanceCriteria.length,
   });
 }

@@ -179,15 +179,24 @@ export async function POST(req: NextRequest) {
   // ── Create SubmissionRecord + Evaluation in a transaction ─────────────────
   // normalizedRepoUrl already computed above in same-URL check
 
+  // Workstream D: determine active implementation path
+  const stageProgress = await prisma.stageProgress.findUnique({
+    where: { enrollmentId_stageId: { enrollmentId, stageId } },
+    select: { implementationPath: true },
+  });
+  const activePath = stageProgress?.implementationPath || enrollment.implementationPath || enrollment.iotMode || null;
+
   const { submissionRecord, evaluation } = await prisma.$transaction(async (tx) => {
     const submissionRecord = await tx.submissionRecord.create({
       data: {
         enrollmentId,
         stageId,
-        submittedUrl:     repoUrl,
+        submittedUrl:       repoUrl,
         normalizedRepoUrl,
-        commitSha:        headSha,
-        // repositoryId and commitSha will be set by the worker (stage 1)
+        commitSha:          headSha,
+        specVersion:        generatedContent?.specVersion || 'v2.0',
+        specHash:           generatedContent?.specHash || null,
+        implementationPath: activePath,
       },
     });
 
@@ -198,6 +207,23 @@ export async function POST(req: NextRequest) {
         stageId,
         status:             'queued',
         currentStageLabel:  'Queued — waiting to start…',
+        specVersion:        generatedContent?.specVersion || 'v2.0',
+        specHash:           generatedContent?.specHash || null,
+      },
+    });
+
+    // Also persist implementationPath to classic Submission table
+    await tx.submission.upsert({
+      where: { enrollmentId_stageId: { enrollmentId, stageId } },
+      update: {
+        contentUrl: repoUrl,
+        implementationPath: activePath,
+      },
+      create: {
+        enrollmentId,
+        stageId,
+        contentUrl: repoUrl,
+        implementationPath: activePath,
       },
     });
 

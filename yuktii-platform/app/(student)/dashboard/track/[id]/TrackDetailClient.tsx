@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2, Lock, ChevronRight, Award, AlertTriangle, RefreshCw,
-  ExternalLink, Cpu, Monitor, Home, Sparkles
+  ExternalLink, Cpu, Monitor, Home, Sparkles, Layers, FileText, CheckSquare, ListOrdered
 } from 'lucide-react';
 import SubmissionForm from './SubmissionForm';
+import SimulationToolsCard from '@/components/SimulationToolsCard';
 
 interface Stage {
   id: string;
@@ -29,6 +30,7 @@ interface TrackDetailClientProps {
     status: string;
     iotMode?: string | null;
     roboticsMode?: string | null;
+    implementationPath?: string | null;
     stageUnlockSchedule?: string | null;
     track: {
       duration: number;
@@ -473,49 +475,200 @@ export default function TrackDetailClient({
                 )}
 
                 {stageContent && !isGenerating && (
-                  <div className="space-y-5">
+                  <div className="space-y-6">
+                    {/* Workstream D: Hardware vs Simulation Path Selector & Curated Tools */}
+                    <SimulationToolsCard
+                      enrollmentId={enrollment.id}
+                      stageId={currentStage.id}
+                      domainSlug={enrollment.track.domain.slug}
+                      currentPath={stageContent.implementationPath || enrollment.implementationPath || enrollment.iotMode || (enrollment as any).roboticsMode || 'simulation'}
+                      tools={stageContent.simulationTools || []}
+                      isLocked={Boolean(currentSubmission?.contentUrl)}
+                      onPathChanged={async () => {
+                        await fetchStageContent(activeStageNumber, true);
+                      }}
+                    />
+
                     {/* Plain language / Non-technical overview */}
                     {stageContent.nonTechnicalExplanation && (
-                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3.5 text-xs text-amber-950 leading-relaxed">
-                        <span className="font-semibold block mb-1 text-amber-900 uppercase tracking-wider text-[11px]">Milestone Overview</span>
+                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-xs text-amber-950 leading-relaxed shadow-xs">
+                        <span className="font-bold block mb-1 text-amber-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                          <Sparkles size={13} /> Milestone Overview (Plain Language)
+                        </span>
                         {stageContent.nonTechnicalExplanation}
                       </div>
                     )}
 
-                    {/* Problem statement */}
+                    {/* Problem Statement */}
                     <div>
                       <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Problem Statement</p>
                       <p className="text-ink/85 leading-relaxed text-sm whitespace-pre-wrap">{stageContent.problemStatement}</p>
                     </div>
 
-                    {/* Requirements list */}
-                    {stageContent.requirements && stageContent.requirements.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Key Requirements</p>
-                        <ul className="space-y-1.5">
-                          {stageContent.requirements.map((req: string, idx: number) => (
-                            <li key={idx} className="flex items-start gap-2 text-sm text-ink/80">
-                              <span className="w-1.5 h-1.5 rounded-full bg-marigold mt-2 shrink-0" />
-                              <span>{req}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    {/* Workstream D: Structured 21-Section Project Specification View */}
+                    {stageContent.projectSpec ? (
+                      <div className="space-y-5 pt-2 border-t border-line/60">
+                        {/* Learning Objectives */}
+                        {stageContent.projectSpec.learningObjectives?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Learning Objectives</p>
+                            <div className="flex flex-wrap gap-2">
+                              {stageContent.projectSpec.learningObjectives.map((obj: string, i: number) => (
+                                <span key={i} className="text-xs px-2.5 py-1 rounded-md bg-stone-100 text-stone-800 border border-stone-200">
+                                  {obj}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
-                    {/* Acceptance criteria */}
-                    {stageContent.acceptanceCriteria && stageContent.acceptanceCriteria.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Acceptance Criteria</p>
-                        <ul className="space-y-1.5">
-                          {stageContent.acceptanceCriteria.map((crit: string, idx: number) => (
-                            <li key={idx} className="flex items-start gap-2 text-sm text-ink/80">
-                              <CheckCircle2 size={14} className="text-teal mt-0.5 shrink-0" />
-                              <span>{crit}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        {/* Functional Requirements (with FR IDs and verify methods) */}
+                        {stageContent.projectSpec.functionalRequirements?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">
+                              Functional Requirements ({stageContent.projectSpec.functionalRequirements.length})
+                            </p>
+                            <div className="space-y-2">
+                              {stageContent.projectSpec.functionalRequirements.map((fr: any, idx: number) => (
+                                <div key={idx} className="p-3 rounded-lg border border-line bg-paper/30 flex items-start justify-between gap-3 text-xs">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded text-[11px]">
+                                        {fr.id}
+                                      </span>
+                                      <span className="font-medium text-ink/90">{fr.text}</span>
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold bg-stone-200/80 text-stone-700 uppercase">
+                                    {fr.verify?.method === 'test' ? 'Sandbox Test' : fr.verify?.method === 'static' ? 'Static Check' : 'Code Review'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Development Roadmap & Milestones */}
+                        {stageContent.projectSpec.gitDevelopmentPlan?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Git Development Milestones</p>
+                            <div className="space-y-1.5">
+                              {stageContent.projectSpec.gitDevelopmentPlan.map((m: any, idx: number) => (
+                                <div key={idx} className="flex items-start gap-2 text-xs text-ink/80">
+                                  <span className="w-5 h-5 rounded-full bg-stone-100 border border-stone-300 text-stone-700 flex items-center justify-center shrink-0 text-[10px] font-bold">
+                                    {idx + 1}
+                                  </span>
+                                  <div>
+                                    <span className="font-semibold text-ink">{m.milestone}</span>
+                                    {m.expectedArtifacts?.length > 0 && (
+                                      <span className="text-ink/55 text-[11px] block">
+                                        Expected artifacts: {m.expectedArtifacts.join(', ')}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Deliverables Checklist */}
+                        {stageContent.projectSpec.deliverables?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Deliverables Checklist</p>
+                            <ul className="grid sm:grid-cols-2 gap-2 text-xs text-ink/80">
+                              {stageContent.projectSpec.deliverables.map((deliv: string, idx: number) => (
+                                <li key={idx} className="flex items-center gap-2 p-2 rounded border border-line bg-white">
+                                  <CheckSquare size={13} className="text-teal shrink-0" />
+                                  <span>{deliv}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Published Test Cases */}
+                        {stageContent.projectSpec.testCases?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Published Example Test Cases</p>
+                            <div className="space-y-1.5">
+                              {stageContent.projectSpec.testCases.map((tc: any, idx: number) => (
+                                <div key={idx} className="p-2.5 rounded border border-line bg-paper/20 flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-[10px] font-bold text-ink/60">{tc.id || `TC-${idx + 1}`}</span>
+                                    <span className="text-ink/85">{tc.name || tc.expected}</span>
+                                  </div>
+                                  <span className="text-[10px] font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                                    Pass Expectation
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Evaluation Rubric (9 Fixed Weighted Categories) */}
+                        {stageContent.projectSpec.evaluationRubric?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Fixed Evaluation Rubric</p>
+                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-center">
+                              {stageContent.projectSpec.evaluationRubric.map((rub: any, idx: number) => (
+                                <div key={idx} className="p-2 rounded border border-line bg-stone-50 text-[11px]">
+                                  <div className="font-bold text-ink text-xs">{rub.weight}%</div>
+                                  <div className="text-ink/65 text-[10px] truncate" title={rub.category}>{rub.category}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Final Submission Checklist */}
+                        {stageContent.projectSpec.finalSubmissionChecklist?.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Final Submission Checklist</p>
+                            <ul className="space-y-1 text-xs text-ink/75">
+                              {stageContent.projectSpec.finalSubmissionChecklist.map((item: string, idx: number) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <CheckCircle2 size={13} className="text-emerald-600 mt-0.5 shrink-0" />
+                                  <span>{item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
+                    ) : (
+                      <>
+                        {/* Fallback Requirements list if full projectSpec not yet populated */}
+                        {stageContent.requirements && stageContent.requirements.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Key Requirements</p>
+                            <ul className="space-y-1.5">
+                              {stageContent.requirements.map((req: string, idx: number) => (
+                                <li key={idx} className="flex items-start gap-2 text-sm text-ink/80">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-marigold mt-2 shrink-0" />
+                                  <span>{req}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Acceptance criteria */}
+                        {stageContent.acceptanceCriteria && stageContent.acceptanceCriteria.length > 0 && (
+                          <div>
+                            <p className="text-xs font-semibold text-marigold-dark/70 uppercase tracking-wider mb-2">Acceptance Criteria</p>
+                            <ul className="space-y-1.5">
+                              {stageContent.acceptanceCriteria.map((crit: string, idx: number) => (
+                                <li key={idx} className="flex items-start gap-2 text-sm text-ink/80">
+                                  <CheckCircle2 size={14} className="text-teal mt-0.5 shrink-0" />
+                                  <span>{crit}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

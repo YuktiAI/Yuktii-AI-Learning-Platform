@@ -174,6 +174,13 @@ export interface PipelineContext {
   scorerDisagreementDelta: number | null;
   passed:               boolean | null; // final pass/fail — gated by hardGateFailed AND score threshold
 
+  // Workstream D: spec and implementation path tracking
+  specVersion:          string | null;
+  specHash:             string | null;
+  implementationPath:   'hardware' | 'simulation' | null;
+  fullProjectSpec:      any | null;
+  specItemResults:      any[] | null;
+
   // Error tracking
   stageErrors:          Record<string, string>;  // stage → error message
 }
@@ -213,6 +220,11 @@ export function createPipelineContext(job: EvaluationJobData): PipelineContext {
     requirementPassRate:   null,
     scorerDisagreementDelta: null,
     passed:                null,
+    specVersion:           'v2.0',
+    specHash:              null,
+    implementationPath:    null,
+    fullProjectSpec:       null,
+    specItemResults:       null,
     stageErrors:           {},
   };
 }

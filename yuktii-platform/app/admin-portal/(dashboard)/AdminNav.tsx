@@ -16,18 +16,20 @@ import {
   Mail,
   ClipboardCheck,
   Shield,
+  FileJson,
 } from 'lucide-react';
 
 const NAV = [
-  { href: '/admin-portal/dashboard', label: 'Overview',    icon: LayoutDashboard },
-  { href: '/admin-portal/analytics', label: 'Analytics',   icon: BarChart2 },
-  { href: '/admin-portal/students',  label: 'Students',    icon: Users },
-  { href: '/admin-portal/domains',   label: 'Domains',     icon: Globe },
-  { href: '/admin-portal/tracks',    label: 'Tracks',      icon: Layers },
-  { href: '/admin-portal/stages',    label: 'Stages',      icon: BookOpen },
-  { href: '/admin-portal/email-logs',label: 'Email Logs',  icon: Mail },
-  { href: '/admin-portal/reviews',   label: 'Reviews',     icon: ClipboardCheck },
-  { href: '/admin-portal/error-logs',label: 'Error Logs',  icon: Shield },
+  { href: '/admin-portal/dashboard',       label: 'Overview',     icon: LayoutDashboard },
+  { href: '/admin-portal/analytics',       label: 'Analytics',    icon: BarChart2 },
+  { href: '/admin-portal/students',        label: 'Students',     icon: Users },
+  { href: '/admin-portal/domains',         label: 'Domains',      icon: Globe },
+  { href: '/admin-portal/tracks',          label: 'Tracks',       icon: Layers },
+  { href: '/admin-portal/stages',          label: 'Stages',       icon: BookOpen },
+  { href: '/admin-portal/stages/spec-preview', label: 'Spec Preview', icon: FileJson },
+  { href: '/admin-portal/email-logs',      label: 'Email Logs',   icon: Mail },
+  { href: '/admin-portal/reviews',         label: 'Reviews',      icon: ClipboardCheck },
+  { href: '/admin-portal/error-logs',      label: 'Error Logs',   icon: Shield },
 ];
 
 export default function AdminNav({ userEmail }: { userEmail: string }) {

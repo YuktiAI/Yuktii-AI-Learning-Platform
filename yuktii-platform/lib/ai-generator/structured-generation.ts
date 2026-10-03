@@ -57,49 +57,189 @@ export interface TwoPassGenerationResult {
   critique: CritiqueResult;
   modelUsed: string;
   version: string;
+  simulationTools?: any[];
 }
 
 /** Convert the generation contract into the stable v2 evaluator contract. */
 export function toProjectSpecification(content: StructuredStageContent, context: {
-  domainName: string; domainSlug: string; levelName: string; stageNumber: number; totalStages: number;
+  domainName: string;
+  domainSlug: string;
+  levelName: string;
+  stageNumber: number;
+  totalStages: number;
+  implementationPath?: 'hardware' | 'simulation' | null;
+  simulationTools?: Array<{
+    name: string;
+    url: string;
+    license: string;
+    openSource: boolean;
+    freeToUse: boolean;
+    gpuRequired: boolean;
+    os: string;
+    description: string;
+    bestFor?: string;
+    browserBased: boolean;
+    isPrimary: boolean;
+  }>;
 }): ProjectSpecification {
   const requirements = content.requirements.map((text, index) => ({
     id: `FR-${String(index + 1).padStart(2, '0')}`,
     text,
     required: true,
-    verify: { method: 'llm_judge' as const, target: `Implementation evidence for FR-${String(index + 1).padStart(2, '0')}` },
+    verify: {
+      method: (index === 0 ? 'static' : index === 1 ? 'test' : 'llm_judge') as 'static' | 'test' | 'llm_judge',
+      target: `Implementation evidence for FR-${String(index + 1).padStart(2, '0')}`,
+    },
   }));
   const foundation = content.difficultyTier === 'foundation';
+  const capstone = content.difficultyTier === 'capstone';
+
   return {
     specVersion: SPEC_VERSION,
-    problemStatement: { title: content.title, domain: context.domainName, difficulty: content.difficultyTier, targetUsers: 'the assigned project users', realWorldContext: content.problemStatement, expectedOutcome: content.technicalExplanation || content.problemStatement },
-    problemDescription: { background: content.problemStatement, industrySignificance: content.nonTechnicalExplanation, existingLimitations: '', proposedSolution: content.technicalExplanation },
+    implementationPath: context.implementationPath || undefined,
+    simulationTools: context.simulationTools && context.simulationTools.length > 0 ? context.simulationTools : undefined,
+    problemStatement: {
+      title: content.title,
+      domain: context.domainName,
+      difficulty: content.difficultyTier,
+      targetUsers: 'internship platform users',
+      realWorldContext: content.problemStatement,
+      expectedOutcome: content.technicalExplanation || content.problemStatement,
+    },
+    problemDescription: {
+      background: content.problemStatement,
+      industrySignificance: content.nonTechnicalExplanation,
+      existingLimitations: foundation ? 'Initial milestone setup' : 'Baseline implementation lacks production rigor',
+      proposedSolution: content.technicalExplanation,
+    },
     learningObjectives: content.learningObjectives,
     prerequisites: content.resourceTags,
-    resourcesAndDatasets: [],
+    resourcesAndDatasets: [
+      {
+        title: `${context.domainName} Reference Documentation`,
+        url: context.domainSlug.includes('iot')
+          ? 'https://docs.wokwi.com/'
+          : context.domainSlug.includes('robotics')
+          ? 'https://docs.ros.org/en/humble/'
+          : 'https://huggingface.co/datasets',
+        rationale: `Verified reference documentation for ${context.domainName}.`,
+        isReachable: true,
+      },
+    ],
     technologyStack: { frontend: [], backend: [], database: [], libraries: content.resourceTags },
     systemArchitecture: content.technicalExplanation,
     functionalRequirements: requirements,
-    nonFunctionalRequirements: foundation ? [] : ['Validate inputs and handle failures safely.'],
+    nonFunctionalRequirements: foundation ? [] : ['Validate inputs and handle failures safely.', 'Follow modular structure.'],
     developmentRoadmap: [content.nonTechnicalExplanation, ...content.acceptanceCriteria],
-    gitDevelopmentPlan: content.expectedFileStructure.map((artifact, index) => ({ milestone: `Milestone ${index + 1}`, expectedArtifacts: [artifact] })),
+    gitDevelopmentPlan: content.expectedFileStructure.map((artifact, index) => ({
+      milestone: `Milestone ${index + 1}: ${artifact.split('/')[0] || 'Module'} setup`,
+      expectedArtifacts: [artifact],
+    })),
     componentsToDevelop: content.expectedFileStructure,
     deliverables: content.passFailCriteria.mustPass,
-    testCases: content.acceptanceCriteria.map((expected, index) => ({ name: `Published check ${index + 1}`, expected })),
-    hiddenTestCases: content.hiddenTestCases.map(test => ({ name: test.name, expected: test.expectedOutput || 'Command succeeds', hidden: true })),
+    testCases: content.acceptanceCriteria.map((expected, index) => ({
+      id: `TC-${String(index + 1).padStart(3, '0')}`,
+      name: `Published check ${index + 1}`,
+      expected,
+    })),
+    hiddenTestCases: content.hiddenTestCases.map((test, index) => ({
+      id: `TC-H${String(index + 1).padStart(3, '0')}`,
+      name: test.name,
+      expected: test.expectedOutput || 'Command succeeds',
+      hidden: true,
+    })),
     edgeCases: foundation ? [] : ['Empty or invalid input', 'Network or dependency failure'],
     securityRequirements: foundation ? [] : ['Do not commit secrets; validate untrusted input.'],
     documentationRequirements: ['README with setup, usage, and verification steps.'],
-    deploymentRequirements: foundation ? [] : ['Document local or container deployment.'],
-    evaluationRubric: [{ category: 'Functional requirements', weight: 60 }, { category: 'Code quality', weight: 20 }, { category: 'Documentation', weight: 20 }],
-    extensionChallenges: { basic: [], intermediate: [], advanced: [], bonus: [] },
-    finalSubmissionChecklist: [...content.passFailCriteria.mustPass, 'Push all source code and documentation to GitHub.'],
+    deploymentRequirements: foundation ? [] : capstone ? ['Production container or cloud deployment configuration.'] : ['Document local run configuration.'],
+    evaluationRubric: [
+      { category: 'Requirements', weight: 25 },
+      { category: 'Functionality', weight: 20 },
+      { category: 'Code Quality', weight: 15 },
+      { category: 'Architecture', weight: 10 },
+      { category: 'Dev Process (Git)', weight: 10 },
+      { category: 'Testing', weight: 5 },
+      { category: 'Documentation', weight: 5 },
+      { category: 'Security', weight: 5 },
+      { category: 'Innovation', weight: 5 },
+    ],
+    extensionChallenges: {
+      basic: ['Complete core functionality and clean README'],
+      intermediate: foundation ? [] : ['Add unit test coverage for edge cases'],
+      advanced: capstone ? ['CI/CD automated pipeline'] : [],
+      bonus: capstone ? ['Containerize with Docker'] : [],
+    },
+    finalSubmissionChecklist: [
+      ...content.passFailCriteria.mustPass,
+      'Push all source code and documentation to GitHub.',
+      'Ensure repository is public and git history reflects incremental commits.',
+    ],
   };
 }
 
 import { generateWithFallback } from './llm-provider';
+import { prisma } from '@/lib/prisma';
+
 
 const GENERATION_VERSION = 'v2.0-structured';
+
+/**
+ * Load curated simulation tools for a given domain slug from the DB.
+ * Returns structured tool list and formatted prompt strings.
+ */
+export async function getCuratedSimulationTools(domainSlug: string): Promise<{
+  tools: Array<{
+    name: string;
+    url: string;
+    license: string;
+    openSource: boolean;
+    freeToUse: boolean;
+    gpuRequired: boolean;
+    os: string;
+    description: string;
+    bestFor?: string;
+    browserBased: boolean;
+    isPrimary: boolean;
+  }>;
+  promptList: string[];
+}> {
+  try {
+    const allTools = await (prisma as any).curatedSimulationTool.findMany({
+      where: { isActive: true },
+    });
+    const s = domainSlug.toLowerCase();
+    const filtered = allTools.filter((t: any) => {
+      try {
+        const domains: string[] = JSON.parse(t.domains);
+        return domains.some((d: string) => s.includes(d) || d.includes(s) || d === 'all');
+      } catch {
+        return false;
+      }
+    });
+
+    const mappedTools = filtered.map((t: any, idx: number) => ({
+      name: t.name,
+      url: t.url,
+      license: t.license || 'Open Source',
+      openSource: Boolean(t.openSource),
+      freeToUse: Boolean(t.freeToUse),
+      gpuRequired: Boolean(t.gpuRequired),
+      os: t.os || 'Linux, Windows, macOS',
+      description: t.description,
+      bestFor: t.bestFor || undefined,
+      browserBased: Boolean(t.browserBased),
+      isPrimary: idx === 0,
+    }));
+
+    const promptList = mappedTools.map((t: any) =>
+      `- ${t.name} (${t.license}, ${t.openSource ? 'Open Source' : 'Free to use'}${t.browserBased ? ', browser-based' : ''}, OS: ${t.os}): ${t.description} — URL: ${t.url} [Best for: ${t.bestFor || 'Simulation'}]`
+    );
+
+    return { tools: mappedTools, promptList };
+  } catch {
+    return { tools: [], promptList: [] };
+  }
+}
 
 /**
  * Pass 1: Structured Generation Call
@@ -113,8 +253,11 @@ async function runPass1(
     totalStages: number;
     masterProject: MasterProject;
     feedbackFromPreviousPass?: string;
+    curatedTools?: string[];  // Workstream D: curated simulation tool list
+    implementationPath?: 'hardware' | 'simulation' | null;
   }
 ): Promise<{ content: StructuredStageContent; provider: string; modelUsed: string }> {
+
   const isCapstone = context.stageNumber === context.totalStages;
   const isWarmup = context.stageNumber === 1;
   const tier = isWarmup
@@ -125,9 +268,22 @@ async function runPass1(
     ? 'practitioner'
     : 'applied';
 
-  const systemPrompt = `You are a Principal Curriculum Architect and Senior Staff Engineer at Yuktii AI Labs.
+const systemPrompt = `You are a Principal Curriculum Architect and Senior Staff Engineer at Yuktii AI Labs.
 You design high-rigor, industry-grade project milestones for real students.
-
+${context.curatedTools && context.curatedTools.length > 0 ? `
+SIMULATION_TOOLS — You MUST reference tools from this curated list when the scenario involves hardware simulation, IoT, robotics, or embedded systems. Do NOT invent tool names.
+${context.curatedTools.join('\n')}
+` : ''}
+${context.implementationPath === 'simulation' ? `
+CRITICAL — IMPLEMENTATION PATH: SIMULATION ONLY (ZERO PHYSICAL HARDWARE REQUIRED).
+The student is building this stage entirely using software simulation:
+- Do NOT require physical hardware boards, physical sensors, or buying components.
+- Use virtual equivalents: e.g. Wokwi virtual ESP32/sensors for IoT, Webots / Gazebo / PyBullet for Robotics, Mosquitto MQTT for messaging, Node-RED for virtual telemetry.
+- Specify simulation deliverables: committed config/source files (diagram.json, world/URDF files, flow scripts, automated run scripts).
+` : context.implementationPath === 'hardware' ? `
+IMPLEMENTATION PATH: PHYSICAL HARDWARE.
+The student is assembling and programming physical hardware components, boards, sensors, and wiring.
+` : ''}
 You MUST produce a valid JSON response conforming EXACTLY to the following schema:
 {
   "title": "Clear concise milestone title",
@@ -168,6 +324,7 @@ CRITICAL RULES:
 - Stage: ${context.stageNumber} of ${context.totalStages}
 - Domain: ${context.domainName} (${context.domainSlug})
 - Level: ${context.levelName}
+- Implementation Path: ${context.implementationPath || 'standard'}
 - Assigned Scenario: ${context.masterProject.scenario}
 - Project Title: ${context.masterProject.projectTitle}
 ${context.feedbackFromPreviousPass ? `\nPREVIOUS CRITIQUE FEEDBACK TO FIX:\n${context.feedbackFromPreviousPass}` : ''}
@@ -293,18 +450,25 @@ export async function generateStructuredStageContent(params: {
   stageNumber: number;
   totalStages: number;
   masterProject: MasterProject;
+  implementationPath?: 'hardware' | 'simulation' | null;
 }): Promise<TwoPassGenerationResult> {
   let feedback: string | undefined = undefined;
   let lastContent: StructuredStageContent | null = null;
   let lastCritique: CritiqueResult | null = null;
   let activeModelUsed = 'unknown';
 
+  // Workstream D: load curated simulation tools for this domain before generating
+  const curatedToolsData = await getCuratedSimulationTools(params.domainSlug);
+
   // Run up to 2 attempts
   for (let attempt = 1; attempt <= 2; attempt++) {
     const pass1Result = await runPass1({
       ...params,
       feedbackFromPreviousPass: feedback,
+      curatedTools: curatedToolsData.promptList,  // Workstream D: inject curated tool list into LLM prompt
+      implementationPath: params.implementationPath,
     });
+
     lastContent = pass1Result.content;
     activeModelUsed = `${pass1Result.provider.toUpperCase()} (${pass1Result.modelUsed})`;
 
@@ -317,6 +481,7 @@ export async function generateStructuredStageContent(params: {
         critique,
         modelUsed: activeModelUsed,
         version: GENERATION_VERSION,
+        simulationTools: curatedToolsData.tools,
       };
     }
 
@@ -339,5 +504,7 @@ export async function generateStructuredStageContent(params: {
     },
     modelUsed: activeModelUsed,
     version: GENERATION_VERSION,
+    simulationTools: curatedToolsData.tools,
   };
 }
+
