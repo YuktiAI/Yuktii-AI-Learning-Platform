@@ -10,6 +10,8 @@ const schema = z.object({
   type: z.enum(['signup', 'forgot']),
 });
 
+const isDev = process.env.NODE_ENV === 'development';
+
 export async function POST(req: NextRequest) {
   return wrapApiRoute(async () => {
     const body = await req.json();
@@ -21,7 +23,7 @@ export async function POST(req: NextRequest) {
     const { contact, via, type } = parsed.data;
     const otp = await createOtp(contact, type);
 
-    // Always log OTP to server console for debugging (never to client)
+    // Always log OTP to server console for debugging (never to client in prod)
     console.log(`\n[OTP] ${via.toUpperCase()} → ${contact} : ${otp}  (${type})\n`);
 
     if (via === 'email') {
@@ -35,15 +37,29 @@ export async function POST(req: NextRequest) {
       });
 
       if (!sendResult.success) {
+        // Log full internal detail server-side only — never expose to client
         console.error(`[OTP] Email delivery failed for ${contact}: ${sendResult.error}`);
+
+        if (isDev) {
+          // In development, surface the OTP on-screen so the flow still works
+          // without needing a configured email provider.
+          console.warn('[OTP] Dev mode: returning OTP in response because email delivery failed.');
+          return NextResponse.json({ ok: true, devOtp: otp });
+        }
+
         return NextResponse.json({
-          error: `Failed to send OTP email: ${sendResult.error || 'Email service error. Please verify server email configuration.'}`,
+          error: 'Unable to send OTP. Please try again in a few minutes.',
         }, { status: 500 });
       }
     } else {
       console.warn(`[OTP] SMS not yet configured. OTP for ${contact}: ${otp}`);
+      if (isDev) {
+        return NextResponse.json({ ok: true, devOtp: otp });
+      }
     }
 
-    return NextResponse.json({ ok: true });
+    // In dev, always return devOtp even when email succeeded (for convenience)
+    return NextResponse.json(isDev ? { ok: true, devOtp: otp } : { ok: true });
   }, { service: 'smtp-otp', req });
 }
+

@@ -341,45 +341,9 @@ export default function SubmissionForm({
     }
   }
 
-  // ── Prerequisite locked state ───────────────────────────────────────────────
-  if (isLockedPrereq) {
-    return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 flex items-start gap-3">
-        <Lock size={20} className="text-amber-600 shrink-0 mt-0.5" />
-        <div>
-          <h3 className="text-sm font-semibold text-amber-900">
-            Stage {stageNumber} Locked
-          </h3>
-          <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-            {stageAccess?.reason || `Complete Stage ${stageNumber - 1} before submitting Stage ${stageNumber}.`}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Pacing locked state (Scenario is open, submission locked until date) ─────
-  if (isLockedPacing) {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 flex items-start gap-3">
-          <Clock size={20} className="text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-semibold text-amber-900">
-              Stage {stageNumber} scenario is ready! Submissions open {unlockCountdown ? `in ${unlockCountdown}` : 'soon'}
-            </h3>
-            <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-              {stageAccess?.reason || `Submissions open on ${unlocksAt?.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}. Use these days to understand the scenario and build your solution.`}
-            </p>
-          </div>
-        </div>
-        <ModelAnswerSection
-          modelAnswer={fullEval?.modelAnswer || modelAnswer}
-          isDynamic={Boolean(fullEval?.modelAnswer)}
-        />
-      </div>
-    );
-  }
+  // ── Prerequisite locked or pacing locked: fall through to form below ─────────
+  // Both states show the form with a banner + disabled submit button.
+  // (Early returns removed so students always see the submission area.)
 
   /* ── DONE STATE (Section 8) ───────────────────────────────────────────────── */
   if (phase === 'done') {
@@ -567,6 +531,25 @@ export default function SubmissionForm({
             </div>
           </div>
 
+          {/* Lock banners — shown above submit button when stage is time-gated or prereq-locked */}
+          {(isLockedPrereq || isLockedPacing) && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-start gap-3 mt-2">
+              <Lock size={18} className="text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Stage {stageNumber} Submission Locked
+                </h3>
+                <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                  {stageAccess?.reason || (
+                    isLockedPacing
+                      ? `Stage ${stageNumber} submission is locked. Please complete the Stage ${stageNumber} activity and submit after ${unlocksAt?.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} IST.`
+                      : `Stage ${stageNumber} submission is locked. Complete Stage ${stageNumber - 1} to unlock this stage.`
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+
           {submitErr && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2 mt-4">
               {submitErr}
@@ -577,9 +560,13 @@ export default function SubmissionForm({
             type="submit"
             disabled={submitting || !isUnlocked}
             className="btn-primary mt-5 disabled:opacity-50"
-            title={!isUnlocked ? `Submission opens in ${unlockCountdown ?? 'soon'}` : undefined}
+            title={!isUnlocked ? `Stage ${stageNumber} submission is locked` : undefined}
           >
-            {submitting ? 'Saving…' : !isUnlocked ? `Locked — opens in ${unlockCountdown ?? 'soon'}` : 'Save & proceed to evaluation →'}
+            {submitting
+              ? 'Saving…'
+              : (isLockedPacing || isLockedPrereq)
+              ? `🔒 Stage ${stageNumber} Submission Locked`
+              : 'Save & proceed to evaluation →'}
           </button>
         </div>
       </form>

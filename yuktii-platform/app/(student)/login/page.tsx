@@ -263,6 +263,7 @@ function LoginContent() {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [devOtp, setDevOtp] = useState<string | null>(null);
 
   // Login
   const [loginEmail, setLoginEmail] = useState('');
@@ -333,10 +334,14 @@ function LoginContent() {
   }
 
   async function sendOtp(contact: string, type: 'signup' | 'forgot', via: 'email' | 'phone') {
-    setLoading(true); setErr(null); setOk(null);
+    setLoading(true); setErr(null); setOk(null); setDevOtp(null);
     try {
-      await apiPost('/api/auth/otp/send', { contact, type, via });
-      setOk(`OTP sent to your ${via === 'email' ? 'email' : 'phone'}. Check your inbox.`);
+      const data = await apiPost('/api/auth/otp/send', { contact, type, via });
+      if (data.devOtp) {
+        setDevOtp(data.devOtp);
+      } else {
+        setOk(`OTP sent to your ${via === 'email' ? 'email' : 'phone'}. Check your inbox.`);
+      }
       return true;
     } catch (e: any) { setErr(e.message); return false; }
     finally { setLoading(false); }
@@ -553,7 +558,23 @@ function LoginContent() {
             </p>
           </div>
 
-          <SentNote contact={suEmail} />
+          {devOtp ? (
+            <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-3 text-sm flex items-center justify-between gap-3">
+              <span className="text-amber-800">
+                <span className="font-semibold">Dev mode — your OTP:</span>{' '}
+                <span className="font-mono font-bold tracking-widest text-amber-900">{devOtp}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(devOtp); setSuOtp(devOtp); }}
+                className="shrink-0 text-xs bg-amber-200 hover:bg-amber-300 text-amber-900 px-2 py-1 rounded transition-colors"
+              >
+                Copy & fill
+              </button>
+            </div>
+          ) : (
+            <SentNote contact={suEmail} />
+          )}
           <OtpInput value={suOtp} onChange={setSuOtp} />
 
           <div className="text-center text-sm text-ink/50">
@@ -643,7 +664,23 @@ function LoginContent() {
             </p>
           </div>
 
-          <SentNote contact={fgContact} />
+          {devOtp ? (
+            <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-3 text-sm flex items-center justify-between gap-3">
+              <span className="text-amber-800">
+                <span className="font-semibold">Dev mode — your OTP:</span>{' '}
+                <span className="font-mono font-bold tracking-widest text-amber-900">{devOtp}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => { navigator.clipboard.writeText(devOtp); setFgOtp(devOtp); }}
+                className="shrink-0 text-xs bg-amber-200 hover:bg-amber-300 text-amber-900 px-2 py-1 rounded transition-colors"
+              >
+                Copy & fill
+              </button>
+            </div>
+          ) : (
+            <SentNote contact={fgContact} />
+          )}
           <OtpInput value={fgOtp} onChange={setFgOtp} />
 
           <div className="text-center text-sm text-ink/50">

@@ -114,7 +114,7 @@ export async function getStageAccess(
       return {
         state: 'LOCKED_PREREQUISITE',
         canSubmit: false,
-        reason: `Complete Stage ${stageNumber - 1} before submitting Stage ${stageNumber}.`,
+        reason: `Stage ${stageNumber} will unlock after you complete Stage ${stageNumber - 1}.`,
         isPassed: false,
         bestScore: null,
         stageNumber,
@@ -164,16 +164,21 @@ export async function getStageAccess(
     }
 
     if (opensAt && now < opensAt) {
-      const msLeft = opensAt.getTime() - now.getTime();
-      const hoursLeft = Math.ceil(msLeft / (1000 * 60 * 60));
-      const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-      const timeRemaining = hoursLeft > 48 ? `${daysLeft} days` : `${hoursLeft} hours`;
+      const formattedDate = opensAt.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
 
       return {
         state: 'SCENARIO_OPEN_SUBMISSION_LOCKED',
         canSubmit: false,
         submissionOpensAt: opensAt.toISOString(),
-        reason: `Great work on Stage ${stageNumber - 1}! Stage ${stageNumber} scenario is ready to read now. You can submit your work in approximately ${timeRemaining}. Use these days to understand the scenario and build it well.`,
+        reason: `Stage ${stageNumber} submission is locked. Please complete the Stage ${stageNumber} activity and submit after ${formattedDate} IST.`,
         isPassed: false,
         bestScore: null,
         stageNumber,
@@ -264,11 +269,15 @@ export async function getAllStagesAccess(
     // Prerequisite check
     if (stageNumber > 1) {
       const prevStage = stages.find((s) => s.stageNumber === stageNumber - 1);
-      if (!prevStage || !passedStages.has(prevStage.id)) {
+      const prevPassed = prevStage ? (
+        passedStages.has(prevStage.id) ||
+        enrollment.submissions.some((s) => s.stageId === prevStage.id && s.aiEvalPassed === true)
+      ) : false;
+      if (!prevStage || !prevPassed) {
         accessMap[stage.id] = {
           state: 'LOCKED_PREREQUISITE',
           canSubmit: false,
-          reason: `Complete Stage ${stageNumber - 1} before submitting Stage ${stageNumber}.`,
+          reason: `Stage ${stageNumber} will unlock after you complete Stage ${stageNumber - 1}.`,
           isPassed: false,
           bestScore: null,
           stageNumber,
@@ -314,16 +323,21 @@ export async function getAllStagesAccess(
       }
 
       if (opensAt && now < opensAt) {
-        const msLeft = opensAt.getTime() - now.getTime();
-        const hoursLeft = Math.ceil(msLeft / (1000 * 60 * 60));
-        const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-        const timeRemaining = hoursLeft > 48 ? `${daysLeft} days` : `${hoursLeft} hours`;
+        const formattedDate = opensAt.toLocaleString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
 
         accessMap[stage.id] = {
           state: 'SCENARIO_OPEN_SUBMISSION_LOCKED',
           canSubmit: false,
           submissionOpensAt: opensAt.toISOString(),
-          reason: `Great work on Stage ${stageNumber - 1}! Stage ${stageNumber} scenario is ready to read now. You can submit your work in approximately ${timeRemaining}. Use these days to understand the scenario and build it well.`,
+          reason: `Stage ${stageNumber} submission is locked. Please complete the Stage ${stageNumber} activity and submit after ${formattedDate} IST.`,
           isPassed: false,
           bestScore: null,
           stageNumber,
